@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { evaluateGovernanceRules, type GovernanceRule } from "../prov/governance.js";
 import type {
   LoaderLogEntry,
   LoaderName,
@@ -548,60 +549,8 @@ export class ProvStore {
     });
   }
 
-  getProcessAnomalies(): ProcessAnomaly[] {
-    const anomalies: ProcessAnomaly[] = [];
-    const relations = this.getRelations();
-
-    // 1. Untracked CommitActivities touching production code without using an Issue or Requirement
-    const commitActivities = this.getActivities().filter(
-      (a) => a.activityType === "CommitActivity"
-    );
-    for (const commitAct of commitActivities) {
-      const files = (commitAct.attributes.files as string[] | undefined) ?? [];
-      const touchesSrc = files.some((f) => f.startsWith("src/") && !f.endsWith("__init__.py"));
-      if (!touchesSrc) continue;
-
-      const hasGovernanceInput = relations.some(
-        (r) =>
-          r.relationType === "used" &&
-          r.subjectId === commitAct.id &&
-          (r.objectId.startsWith("entity:issue:") || r.objectId.startsWith("entity:req:"))
-      );
-
-      if (!hasGovernanceInput) {
-        anomalies.push({
-          severity: "high",
-          category: "Untracked Work",
-          nodeId: commitAct.id,
-          label: commitAct.label,
-          detail: `Commit activity modifies production source (${files.join(", ")}) with no prov:used link to any GitHub Issue or AsciiDoc Requirement.`,
-        });
-      }
-    }
-
-    // 2. Unimplemented or untested requirements
-    for (const row of this.getRequirementsMatrix()) {
-      if (row.compliance === "unimplemented") {
-        anomalies.push({
-          severity: "medium",
-          category: "Unimplemented Spec",
-          nodeId: row.reqId,
-          label: `${row.code}: ${row.title}`,
-          detail: `Defined in AsciiDoc (${row.specStatus}) with ${row.issues.length} linked issue(s), but zero derived CodeArtifact entities exist.`,
-        });
-      } else if (row.compliance === "untested") {
-        const fileNames = row.codeFiles.map((f) => String(f.attributes.path ?? f.label)).join(", ");
-        anomalies.push({
-          severity: "medium",
-          category: "Missing Test Coverage",
-          nodeId: row.reqId,
-          label: `${row.code}: ${row.title}`,
-          detail: `Implemented in ${fileNames}, but no TestArtifact derives from this requirement or its commit activities.`,
-        });
-      }
-    }
-
-    return anomalies;
+  getProcessAnomalies(rules?: readonly GovernanceRule[]): ProcessAnomaly[] {
+    return evaluateGovernanceRules(this, rules);
   }
 
   getActivityTimeline() {

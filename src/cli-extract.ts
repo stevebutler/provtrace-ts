@@ -13,7 +13,7 @@ async function main() {
   console.log("Summary Stats:", stats);
   console.log("Detected Process Anomalies:", anomalies.length);
   for (const a of anomalies) {
-    console.log(` - [${a.severity.toUpperCase()}] ${a.category}: ${a.label}`);
+    console.log(` - [${a.severity.toUpperCase()}] (${a.ruleId}) ${a.category}: ${a.label}`);
   }
 }
 

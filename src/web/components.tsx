@@ -532,9 +532,10 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
         ) : (
           <div class="anomaly-grid">
             {anomalies.map((a) => (
-              <div class="anomaly-card" key={`${a.category}-${a.nodeId}`}>
+              <div class="anomaly-card" key={`${a.ruleId}-${a.nodeId}`}>
                 <div style="display: flex; align-items: safe center; gap: 0.45rem; margin-block-end: 0.35rem;">
                   <span class={`badge ${a.severity}`}>{a.category}</span>
+                  <code style="font-size: 0.74rem; color: var(--text-muted);">{a.ruleId}</code>
                   <button
                     type="button"
                     class="small"

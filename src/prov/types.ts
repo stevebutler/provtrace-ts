@@ -101,9 +101,12 @@ export interface RequirementTraceRow {
   compliance: "verified" | "untested" | "unimplemented";
 }
 
+export type AnomalySeverity = "high" | "medium" | "low";
+
 export interface ProcessAnomaly {
-  severity: "high" | "medium" | "low";
-  category: "Untracked Work" | "Unimplemented Spec" | "Missing Test Coverage";
+  ruleId: string;
+  severity: AnomalySeverity;
+  category: string;
   nodeId: string;
   label: string;
   detail: string;

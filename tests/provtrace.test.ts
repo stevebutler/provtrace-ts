@@ -5,6 +5,7 @@ import { seedTargetRepo } from "../scripts/seed-target-repo.js";
 import { ProvStore } from "../src/db/store.js";
 import { ExtractionPipeline } from "../src/extractors/pipeline.js";
 import { createApp } from "../src/index.js";
+import { GOVERNANCE_RULES, type GovernanceRule } from "../src/prov/governance.js";
 
 test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph", async () => {
   const repoDir = seedTargetRepo();
@@ -35,10 +36,34 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   assert.equal(byCode.get("REQ-004")?.compliance, "unimplemented");
 
   const anomalies = store.getProcessAnomalies();
+  assert.equal(GOVERNANCE_RULES.length, 3);
+  assert.deepEqual(
+    anomalies.map((a) => a.ruleId),
+    ["GOV-001", "GOV-002", "GOV-003"]
+  );
   const categories = anomalies.map((a) => a.category);
   assert.ok(categories.includes("Untracked Work"), "Should detect untracked CLI commit");
   assert.ok(categories.includes("Unimplemented Spec"), "Should detect unimplemented REQ-004");
   assert.ok(categories.includes("Missing Test Coverage"), "Should detect untested REQ-003");
+
+  // Verify custom rules can be evaluated through the registry interface
+  const customRule: GovernanceRule = {
+    id: "GOV-999",
+    category: "Open PR Check",
+    severity: "low",
+    description: "Flags unmerged pull requests.",
+    evaluate: ({ entities }) =>
+      entities
+        .filter((e) => e.entityType === "PullRequest" && e.attributes.state === "open")
+        .map((pr) => ({
+          nodeId: pr.id,
+          label: pr.label,
+          detail: "Pull request is still open.",
+        })),
+  };
+  const customFindings = store.getProcessAnomalies([customRule]);
+  assert.equal(customFindings.length, 1);
+  assert.equal(customFindings[0].ruleId, "GOV-999");
 });
 
 test("Hono + JSX + Datastar routes render full page, focus fragments, and PROV-JSON", async () => {

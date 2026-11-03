@@ -18,7 +18,7 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   const stats = store.getSummaryStats();
   assert.equal(stats.requirementsTotal, 4);
   assert.equal(stats.requirementsImplemented, 3); // REQ-001, REQ-002, REQ-003
-  assert.equal(stats.requirementsVerified, 2); // REQ-001, REQ-002 have unit tests
+  assert.equal(stats.requirementsCompliant, 2); // REQ-001, REQ-002 pass all governance rules
   assert.ok(stats.entities >= 20);
   assert.ok(stats.relations >= 50);
   assert.equal(
@@ -30,10 +30,19 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   const matrix = store.getRequirementsMatrix();
   const byCode = new Map(matrix.map((r) => [r.code, r]));
 
-  assert.equal(byCode.get("REQ-001")?.compliance, "verified");
-  assert.equal(byCode.get("REQ-002")?.compliance, "verified");
-  assert.equal(byCode.get("REQ-003")?.compliance, "untested");
-  assert.equal(byCode.get("REQ-004")?.compliance, "unimplemented");
+  assert.equal(byCode.get("REQ-001")?.compliant, true);
+  assert.deepEqual(byCode.get("REQ-001")?.findings, []);
+  assert.equal(byCode.get("REQ-002")?.compliant, true);
+  assert.equal(byCode.get("REQ-003")?.compliant, false);
+  assert.deepEqual(
+    byCode.get("REQ-003")?.findings.map((f) => f.ruleId),
+    ["GOV-003"]
+  );
+  assert.equal(byCode.get("REQ-004")?.compliant, false);
+  assert.deepEqual(
+    byCode.get("REQ-004")?.findings.map((f) => f.ruleId),
+    ["GOV-002"]
+  );
 
   const anomalies = store.getProcessAnomalies();
   assert.equal(GOVERNANCE_RULES.length, 3);
@@ -46,24 +55,30 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   assert.ok(categories.includes("Unimplemented Spec"), "Should detect unimplemented REQ-004");
   assert.ok(categories.includes("Missing Test Coverage"), "Should detect untested REQ-003");
 
-  // Verify custom rules can be evaluated through the registry interface
+  // Verify custom rules drive both getProcessAnomalies AND getRequirementsMatrix compliance
   const customRule: GovernanceRule = {
     id: "GOV-999",
     category: "Open PR Check",
     severity: "low",
-    description: "Flags unmerged pull requests.",
-    evaluate: ({ entities }) =>
-      entities
-        .filter((e) => e.entityType === "PullRequest" && e.attributes.state === "open")
-        .map((pr) => ({
-          nodeId: pr.id,
-          label: pr.label,
-          detail: "Pull request is still open.",
+    description: "Flags requirements that still have unmerged pull requests.",
+    evaluate: ({ requirementTraces }) =>
+      requirementTraces
+        .filter((t) => t.pullRequests.some((pr) => pr.attributes.state === "open"))
+        .map((t) => ({
+          nodeId: t.reqId,
+          label: `${t.code}: ${t.title}`,
+          detail: "Requirement has an open pull request pending review.",
         })),
   };
   const customFindings = store.getProcessAnomalies([customRule]);
   assert.equal(customFindings.length, 1);
   assert.equal(customFindings[0].ruleId, "GOV-999");
+
+  const customMatrix = store.getRequirementsMatrix([customRule]);
+  const customByCode = new Map(customMatrix.map((r) => [r.code, r]));
+  assert.equal(customByCode.get("REQ-003")?.compliant, false);
+  assert.equal(customByCode.get("REQ-003")?.findings[0]?.ruleId, "GOV-999");
+  assert.equal(customByCode.get("REQ-004")?.compliant, true); // Only customRule evaluated
 });
 
 test("Hono + JSX + Datastar routes render full page, focus fragments, and PROV-JSON", async () => {

@@ -88,19 +88,6 @@ export interface LoaderLogEntry {
   message: string;
 }
 
-export interface RequirementTraceRow {
-  reqId: string;
-  code: string;
-  title: string;
-  specStatus: string;
-  issues: ProvEntity[];
-  pullRequests: ProvEntity[];
-  commitActivities: ProvActivity[];
-  codeFiles: ProvEntity[];
-  testFiles: ProvEntity[];
-  compliance: "verified" | "untested" | "unimplemented";
-}
-
 export type AnomalySeverity = "high" | "medium" | "low";
 
 export interface ProcessAnomaly {
@@ -112,6 +99,23 @@ export interface ProcessAnomaly {
   detail: string;
 }
 
+export interface RequirementTrace {
+  reqId: string;
+  code: string;
+  title: string;
+  specStatus: string;
+  issues: ProvEntity[];
+  pullRequests: ProvEntity[];
+  commitActivities: ProvActivity[];
+  codeFiles: ProvEntity[];
+  testFiles: ProvEntity[];
+}
+
+export interface RequirementTraceRow extends RequirementTrace {
+  compliant: boolean;
+  findings: ProcessAnomaly[];
+}
+
 export interface SummaryStats {
   entities: number;
   activities: number;
@@ -119,7 +123,7 @@ export interface SummaryStats {
   relations: number;
   requirementsTotal: number;
   requirementsImplemented: number;
-  requirementsVerified: number;
+  requirementsCompliant: number;
   tracedCommitsPct: number;
   avgIssueLeadTimeHours: number | null;
 }

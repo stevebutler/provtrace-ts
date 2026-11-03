@@ -53,12 +53,12 @@ export const KpiSection: FC<{ store: ProvStore }> = ({ store }) => {
           <div class="kpi-meta">wasDerivedFrom, used, wasGeneratedBy</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Spec Coverage</div>
+          <div class="kpi-label">Spec Compliance</div>
           <div class="kpi-value">
-            {stats.requirementsVerified}/{stats.requirementsTotal}
+            {stats.requirementsCompliant}/{stats.requirementsTotal}
           </div>
           <div class="kpi-meta">
-            {stats.requirementsImplemented} implemented, {stats.requirementsVerified} tested
+            {stats.requirementsImplemented} implemented, {stats.requirementsCompliant} passing rules
           </div>
         </div>
         <div class="kpi-card">
@@ -606,7 +606,21 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                     </div>
                   </th>
                   <td>
-                    <span class={`badge ${row.compliance}`}>{row.compliance}</span>
+                    {row.compliant ? (
+                      <span class="badge ok">Compliant</span>
+                    ) : (
+                      <div class="chip-group">
+                        {row.findings.map((f) => (
+                          <span
+                            key={f.ruleId}
+                            class={`badge ${f.severity}`}
+                            title={f.detail}
+                          >
+                            {f.ruleId}: {f.category}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <div class="chip-group">

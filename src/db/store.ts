@@ -15,6 +15,7 @@ import type {
   ProvGraphNode,
   ProvRelation,
   ProvRelationType,
+  RequirementTrace,
   RequirementTraceRow,
   SummaryStats,
 } from "../prov/types.js";
@@ -381,8 +382,8 @@ export class ProvStore {
 
     const matrix = this.getRequirementsMatrix();
     const requirementsTotal = matrix.length;
-    const requirementsImplemented = matrix.filter((r) => r.compliance !== "unimplemented").length;
-    const requirementsVerified = matrix.filter((r) => r.compliance === "verified").length;
+    const requirementsImplemented = matrix.filter((r) => r.codeFiles.length > 0).length;
+    const requirementsCompliant = matrix.filter((r) => r.compliant).length;
 
     const commitActivities = this.getActivities().filter(
       (a) => a.activityType === "CommitActivity"
@@ -426,13 +427,13 @@ export class ProvStore {
       relations: count("prov_relations"),
       requirementsTotal,
       requirementsImplemented,
-      requirementsVerified,
+      requirementsCompliant,
       tracedCommitsPct,
       avgIssueLeadTimeHours,
     };
   }
 
-  getRequirementsMatrix(): RequirementTraceRow[] {
+  getRequirementTraces(): RequirementTrace[] {
     const requirements = this.getEntities("Requirement");
     const allEntities = new Map(this.getEntities().map((e) => [e.id, e]));
     const allActivities = new Map(this.getActivities().map((a) => [a.id, a]));
@@ -527,13 +528,6 @@ export class ProvStore {
         .map((id) => allEntities.get(id))
         .filter((e): e is ProvEntity => Boolean(e));
 
-      let compliance: "verified" | "untested" | "unimplemented" = "unimplemented";
-      if (codeFiles.length > 0 && testFiles.length > 0) {
-        compliance = "verified";
-      } else if (codeFiles.length > 0) {
-        compliance = "untested";
-      }
-
       return {
         reqId: req.id,
         code: String(req.attributes.code ?? req.id.replace("entity:req:", "")),
@@ -544,7 +538,26 @@ export class ProvStore {
         commitActivities,
         codeFiles,
         testFiles,
-        compliance,
+      };
+    });
+  }
+
+  getRequirementsMatrix(rules?: readonly GovernanceRule[]): RequirementTraceRow[] {
+    const traces = this.getRequirementTraces();
+    const anomalies = evaluateGovernanceRules(this, rules, traces);
+    const findingsByNode = new Map<string, ProcessAnomaly[]>();
+
+    for (const anomaly of anomalies) {
+      if (!findingsByNode.has(anomaly.nodeId)) findingsByNode.set(anomaly.nodeId, []);
+      findingsByNode.get(anomaly.nodeId)!.push(anomaly);
+    }
+
+    return traces.map((trace) => {
+      const findings = findingsByNode.get(trace.reqId) ?? [];
+      return {
+        ...trace,
+        compliant: findings.length === 0,
+        findings,
       };
     });
   }

@@ -6,7 +6,7 @@ import type {
   ProvAgent,
   ProvEntity,
   ProvRelation,
-  RequirementTraceRow,
+  RequirementTrace,
 } from "./types.js";
 
 export interface GovernanceContext {
@@ -14,7 +14,7 @@ export interface GovernanceContext {
   activities: ProvActivity[];
   agents: ProvAgent[];
   relations: ProvRelation[];
-  requirementsMatrix: RequirementTraceRow[];
+  requirementTraces: RequirementTrace[];
 }
 
 export interface GovernanceRuleFinding {
@@ -72,13 +72,13 @@ export const unimplementedSpecRule: GovernanceRule = {
   severity: "medium",
   description:
     "Every Requirement entity extracted from specifications should have at least one downstream CodeArtifact via prov:wasDerivedFrom.",
-  evaluate({ requirementsMatrix }) {
-    return requirementsMatrix
-      .filter((row) => row.compliance === "unimplemented")
-      .map((row) => ({
-        nodeId: row.reqId,
-        label: `${row.code}: ${row.title}`,
-        detail: `Defined in AsciiDoc (${row.specStatus}) with ${row.issues.length} linked issue(s), but zero derived CodeArtifact entities exist.`,
+  evaluate({ requirementTraces }) {
+    return requirementTraces
+      .filter((trace) => trace.codeFiles.length === 0)
+      .map((trace) => ({
+        nodeId: trace.reqId,
+        label: `${trace.code}: ${trace.title}`,
+        detail: `Defined in AsciiDoc (${trace.specStatus}) with ${trace.issues.length} linked issue(s), but zero derived CodeArtifact entities exist.`,
       }));
   },
 };
@@ -89,14 +89,16 @@ export const missingTestCoverageRule: GovernanceRule = {
   severity: "medium",
   description:
     "Every implemented Requirement with derived CodeArtifact entities must also have at least one derived TestArtifact.",
-  evaluate({ requirementsMatrix }) {
-    return requirementsMatrix
-      .filter((row) => row.compliance === "untested")
-      .map((row) => {
-        const fileNames = row.codeFiles.map((f) => String(f.attributes.path ?? f.label)).join(", ");
+  evaluate({ requirementTraces }) {
+    return requirementTraces
+      .filter((trace) => trace.codeFiles.length > 0 && trace.testFiles.length === 0)
+      .map((trace) => {
+        const fileNames = trace.codeFiles
+          .map((f) => String(f.attributes.path ?? f.label))
+          .join(", ");
         return {
-          nodeId: row.reqId,
-          label: `${row.code}: ${row.title}`,
+          nodeId: trace.reqId,
+          label: `${trace.code}: ${trace.title}`,
           detail: `Implemented in ${fileNames}, but no TestArtifact derives from this requirement or its commit activities.`,
         };
       });
@@ -105,7 +107,7 @@ export const missingTestCoverageRule: GovernanceRule = {
 
 /**
  * Central registry of software development process-mining governance rules.
- * Add new GovernanceRule definitions here to include them automatically in reports and CLI checks.
+ * Add new GovernanceRule definitions here to include them automatically in reports, matrix compliance, and CLI checks.
  */
 export const GOVERNANCE_RULES: readonly GovernanceRule[] = [
   untrackedWorkRule,
@@ -115,14 +117,15 @@ export const GOVERNANCE_RULES: readonly GovernanceRule[] = [
 
 export function evaluateGovernanceRules(
   store: ProvStore,
-  rules: readonly GovernanceRule[] = GOVERNANCE_RULES
+  rules: readonly GovernanceRule[] = GOVERNANCE_RULES,
+  precomputedTraces?: RequirementTrace[]
 ): ProcessAnomaly[] {
   const ctx: GovernanceContext = {
     entities: store.getEntities(),
     activities: store.getActivities(),
     agents: store.getAgents(),
     relations: store.getRelations(),
-    requirementsMatrix: store.getRequirementsMatrix(),
+    requirementTraces: precomputedTraces ?? store.getRequirementTraces(),
   };
 
   const anomalies: ProcessAnomaly[] = [];

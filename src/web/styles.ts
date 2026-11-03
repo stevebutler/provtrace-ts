@@ -336,22 +336,22 @@ button.small, .btn.small {
   white-space: nowrap;
 }
 
-.badge.ok, .badge.completed, .badge.verified {
+.badge.ok, .badge.completed {
   background: var(--ok-bg);
   color: var(--ok-fg);
 }
 
-.badge.warn, .badge.running, .badge.untested {
+.badge.warn, .badge.running, .badge.medium {
   background: var(--warn-bg);
   color: var(--warn-fg);
 }
 
-.badge.err, .badge.failed, .badge.unimplemented, .badge.high {
+.badge.err, .badge.failed, .badge.high {
   background: var(--err-bg);
   color: var(--err-fg);
 }
 
-.badge.idle, .badge.neutral, .badge.medium {
+.badge.idle, .badge.neutral, .badge.low {
   background: var(--bg-subtle);
   color: var(--text-muted);
 }

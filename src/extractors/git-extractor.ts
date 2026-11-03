@@ -1,0 +1,223 @@
+import { execFileSync } from "node:child_process";
+import type { ProvStore } from "../db/store.js";
+import type { EntityType } from "../prov/types.js";
+
+export interface ExtractorContext {
+  store: ProvStore;
+  repoDir: string;
+  fixtureFile: string;
+  stepDelayMs?: number;
+  onStep?: (info: {
+    progressPct: number;
+    itemsProcessed: number;
+    relationsCreated: number;
+    message: string;
+  }) => Promise<void> | void;
+}
+
+const sleep = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+
+function classifyPath(filePath: string): EntityType {
+  if (filePath.startsWith("docs/") || filePath.endsWith(".adoc")) {
+    return "DocumentRevision";
+  }
+  if (filePath.startsWith("tests/") || filePath.includes("test_")) {
+    return "TestArtifact";
+  }
+  return "CodeArtifact";
+}
+
+export async function runGitExtractor(ctx: ExtractorContext) {
+  const { store, repoDir, stepDelayMs = 0, onStep } = ctx;
+
+  // Format: sha | shortSha | parentShort | authorName | authorEmail | authorIso | subject | body
+  const rawLog = execFileSync(
+    "git",
+    [
+      "log",
+      "--reverse",
+      "--format=%H%x1f%h%x1f%p%x1f%an%x1f%ae%x1f%aI%x1f%s%x1f%b%x1e",
+    ],
+    { cwd: repoDir, encoding: "utf8" }
+  );
+
+  const rawCommits = rawLog
+    .split("\x1e")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let items = 0;
+  let relations = 0;
+  const previousFileRevision = new Map<string, string>();
+
+  for (let i = 0; i < rawCommits.length; i++) {
+    const parts = rawCommits[i].split("\x1f");
+    const [sha, shortSha, parentShorts, authorName, authorEmail, authorIso, subject, body = ""] =
+      parts;
+
+    const filesOutput = execFileSync(
+      "git",
+      ["show", "--pretty=format:", "--name-only", sha],
+      { cwd: repoDir, encoding: "utf8" }
+    );
+    const files = filesOutput
+      .split("\n")
+      .map((f) => f.trim())
+      .filter(Boolean);
+
+    const agentId = `agent:git:${authorEmail.toLowerCase()}`;
+    store.upsertAgent({
+      id: agentId,
+      agentType: "Person",
+      label: `${authorName} <${authorEmail}>`,
+      attributes: {
+        name: authorName,
+        email: authorEmail.toLowerCase(),
+      },
+    });
+
+    const activityId = `activity:commit:${shortSha}`;
+    store.upsertActivity({
+      id: activityId,
+      activityType: "CommitActivity",
+      label: `Commit ${shortSha}: ${subject}`,
+      source: "git-repo",
+      startedAt: authorIso,
+      endedAt: authorIso,
+      attributes: {
+        sha,
+        shortSha,
+        subject,
+        filesCount: files.length,
+      },
+    });
+
+    const commitEntityId = `entity:commit:${shortSha}`;
+    store.upsertEntity({
+      id: commitEntityId,
+      entityType: "Commit",
+      label: `${shortSha} — ${subject}`,
+      source: "git-repo",
+      createdAt: authorIso,
+      attributes: {
+        sha,
+        shortSha,
+        subject,
+        body: body.trim(),
+        fullMessage: `${subject}\n${body}`.trim(),
+        authorEmail: authorEmail.toLowerCase(),
+        files,
+      },
+    });
+    items++;
+
+    store.addRelation({
+      relationType: "wasAssociatedWith",
+      subjectId: activityId,
+      objectId: agentId,
+      role: "author",
+      attributes: {},
+    });
+    store.addRelation({
+      relationType: "wasGeneratedBy",
+      subjectId: commitEntityId,
+      objectId: activityId,
+      attributes: {},
+    });
+    store.addRelation({
+      relationType: "wasAttributedTo",
+      subjectId: commitEntityId,
+      objectId: agentId,
+      attributes: {},
+    });
+    relations += 3;
+
+    // Parent commit derivation
+    for (const parentShort of parentShorts.split(" ").map((p) => p.trim()).filter(Boolean)) {
+      store.addRelation({
+        relationType: "wasDerivedFrom",
+        subjectId: commitEntityId,
+        objectId: `entity:commit:${parentShort}`,
+        role: "git:parent",
+        attributes: {},
+      });
+      store.addRelation({
+        relationType: "used",
+        subjectId: activityId,
+        objectId: `entity:commit:${parentShort}`,
+        attributes: {},
+      });
+      relations += 2;
+    }
+
+    // File-level artifact entities
+    for (const filePath of files) {
+      const fileEntityType = classifyPath(filePath);
+      const fileEntityId = `entity:file:${filePath}@${shortSha}`;
+      store.upsertEntity({
+        id: fileEntityId,
+        entityType: fileEntityType,
+        label: `${filePath} @ ${shortSha}`,
+        source: "git-repo",
+        createdAt: authorIso,
+        attributes: {
+          path: filePath,
+          commitSha: sha,
+          shortSha,
+        },
+      });
+      items++;
+
+      store.addRelation({
+        relationType: "wasGeneratedBy",
+        subjectId: fileEntityId,
+        objectId: activityId,
+        attributes: {},
+      });
+      store.addRelation({
+        relationType: "wasAttributedTo",
+        subjectId: fileEntityId,
+        objectId: agentId,
+        attributes: {},
+      });
+      store.addRelation({
+        relationType: "wasDerivedFrom",
+        subjectId: fileEntityId,
+        objectId: commitEntityId,
+        role: "provtrace:inCommit",
+        attributes: {},
+      });
+      relations += 3;
+
+      const prevFileId = previousFileRevision.get(filePath);
+      if (prevFileId) {
+        store.addRelation({
+          relationType: "wasDerivedFrom",
+          subjectId: fileEntityId,
+          objectId: prevFileId,
+          role: "prov:Revision",
+          attributes: {},
+        });
+        store.addRelation({
+          relationType: "used",
+          subjectId: activityId,
+          objectId: prevFileId,
+          attributes: {},
+        });
+        relations += 2;
+      }
+      previousFileRevision.set(filePath, fileEntityId);
+    }
+
+    const pct = Math.round(((i + 1) / rawCommits.length) * 100);
+    await onStep?.({
+      progressPct: pct,
+      itemsProcessed: items,
+      relationsCreated: relations,
+      message: `Processed commit ${shortSha} (${files.length} files): "${subject}"`,
+    });
+    await sleep(stepDelayMs);
+  }
+
+  return { itemsProcessed: items, relationsCreated: relations };
+}

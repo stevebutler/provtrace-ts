@@ -1,0 +1,125 @@
+{
+  "repository": {
+    "owner": "acme",
+    "name": "pyledger",
+    "full_name": "acme/pyledger",
+    "description": "Lightweight Python CLI ledger and budget tracker"
+  },
+  "users": [
+    {
+      "login": "alice-pm",
+      "name": "Alice Hartmann",
+      "email": "alice@acme.dev",
+      "role": "Product Lead"
+    },
+    {
+      "login": "bob-dev",
+      "name": "Bob Lindqvist",
+      "email": "bob@acme.dev",
+      "role": "Senior Engineer"
+    },
+    {
+      "login": "carol-qa",
+      "name": "Carol Mensah",
+      "email": "carol@acme.dev",
+      "role": "QA Engineer"
+    }
+  ],
+  "issues": [
+    {
+      "number": 1,
+      "title": "Define initial ledger & category tracking specification",
+      "state": "closed",
+      "kind": "enhancement",
+      "labels": ["spec", "enhancement"],
+      "user": "alice-pm",
+      "created_at": "2026-10-01T09:00:00Z",
+      "closed_at": "2026-10-02T14:30:00Z",
+      "closed_by": "alice-pm",
+      "body": "Establish the core product requirements in AsciiDoc (`docs/requirements.adoc`) covering REQ-001 (decimal ledger transactions) and REQ-002 (category summaries)."
+    },
+    {
+      "number": 2,
+      "title": "Implement core Ledger entry and category balance engine",
+      "state": "closed",
+      "kind": "feature",
+      "labels": ["feature", "core"],
+      "user": "alice-pm",
+      "created_at": "2026-10-02T15:00:00Z",
+      "closed_at": "2026-10-05T16:45:00Z",
+      "closed_by": "bob-dev",
+      "body": "Implement Python ledger engine derived from #1 covering REQ-001 and REQ-002, with unit tests for deposits, expenses, and category rollups."
+    },
+    {
+      "number": 3,
+      "title": "Bug: Split transaction rounding loses 1 cent on odd 3-way splits",
+      "state": "closed",
+      "kind": "bug",
+      "labels": ["bug", "financial-accuracy"],
+      "user": "carol-qa",
+      "created_at": "2026-10-06T10:15:00Z",
+      "closed_at": "2026-10-07T11:50:00Z",
+      "closed_by": "bob-dev",
+      "body": "When splitting $10.00 three ways under REQ-001, `split_amount` returns three $3.33 entries ($9.99 total) instead of allocating the remainder cent. Discovered while testing #2."
+    },
+    {
+      "number": 4,
+      "title": "Add monthly category budget threshold alerts",
+      "state": "open",
+      "kind": "feature",
+      "labels": ["feature", "budget"],
+      "user": "alice-pm",
+      "created_at": "2026-10-08T09:30:00Z",
+      "closed_at": null,
+      "closed_by": null,
+      "body": "Implement budget rules and warning alerts specified in REQ-003 (`docs/requirements.adoc`). Should flag categories exceeding 80% warning or 100% limit."
+    },
+    {
+      "number": 5,
+      "title": "Support multi-currency FX rates in CSV import",
+      "state": "open",
+      "kind": "feature",
+      "labels": ["feature", "backlog"],
+      "user": "alice-pm",
+      "created_at": "2026-10-10T11:00:00Z",
+      "closed_at": null,
+      "closed_by": null,
+      "body": "Track implementation work for REQ-004 multi-currency ledger support. Waiting on FX provider selection."
+    }
+  ],
+  "pull_requests": [
+    {
+      "number": 10,
+      "title": "Implement core ledger & category rollups (REQ-001, REQ-002)",
+      "state": "merged",
+      "user": "bob-dev",
+      "reviewer": "carol-qa",
+      "created_at": "2026-10-04T17:00:00Z",
+      "merged_at": "2026-10-05T16:45:00Z",
+      "closes_issues": [2],
+      "commit_subject_match": "Implement core Ledger and category rollup"
+    },
+    {
+      "number": 11,
+      "title": "Fix remainder cent allocation in split_amount",
+      "state": "merged",
+      "user": "bob-dev",
+      "reviewer": "carol-qa",
+      "created_at": "2026-10-07T09:20:00Z",
+      "merged_at": "2026-10-07T11:50:00Z",
+      "closes_issues": [3],
+      "commit_subject_match": "Fix split_amount remainder cent drift"
+    },
+    {
+      "number": 12,
+      "title": "WIP: Add monthly budget evaluator for REQ-003",
+      "state": "open",
+      "user": "bob-dev",
+      "reviewer": "alice-pm",
+      "created_at": "2026-10-09T15:10:00Z",
+      "merged_at": null,
+      "closes_issues": [4],
+      "commit_subject_match": "Add budget threshold evaluator"
+    }
+  ]
+}

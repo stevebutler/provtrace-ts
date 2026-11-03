@@ -35,12 +35,12 @@ export const KpiSection: FC<{ store: ProvStore }> = ({ store }) => {
         <div class="kpi-card">
           <div class="kpi-label">prov:Entity</div>
           <div class="kpi-value">{stats.entities}</div>
-          <div class="kpi-meta">Issues, Specs, PRs, Commits, Files</div>
+          <div class="kpi-meta">Issues, Specs, PRs, Code &amp; Test Files</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">prov:Activity</div>
           <div class="kpi-value">{stats.activities}</div>
-          <div class="kpi-meta">Commits, Issue Reports &amp; Reviews</div>
+          <div class="kpi-meta">Git Commits, Issue &amp; PR Events</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">prov:Agent</div>
@@ -297,7 +297,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
           <p>
             {focusId
               ? `Showing 2-hop PROV neighborhood (Entities, Activities & Agents) around ${focusId}`
-              : "Overview of end-to-end prov:wasDerivedFrom lineage across GitHub Issues, AsciiDoc Specs, PRs, Commits & Python Files"}
+              : "Overview of causal lineage across Issues, AsciiDoc Specs, Commit Activities (prov:Activity), Files & PRs"}
           </p>
         </div>
         <div class="panel-actions">
@@ -532,14 +532,14 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
         ) : (
           <div class="anomaly-grid">
             {anomalies.map((a) => (
-              <div class="anomaly-card" key={`${a.category}-${a.entityId}`}>
+              <div class="anomaly-card" key={`${a.category}-${a.nodeId}`}>
                 <div style="display: flex; align-items: safe center; gap: 0.45rem; margin-block-end: 0.35rem;">
                   <span class={`badge ${a.severity}`}>{a.category}</span>
                   <button
                     type="button"
                     class="small"
                     style="margin-inline-start: auto;"
-                    {...dsClick(`@get('/api/focus?id=${encodeURIComponent(a.entityId)}')`)}
+                    {...dsClick(`@get('/api/focus?id=${encodeURIComponent(a.nodeId)}')`)}
                   >
                     Inspect Graph
                   </button>
@@ -583,7 +583,7 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                 <th scope="col">Compliance</th>
                 <th scope="col">GitHub Issues</th>
                 <th scope="col">Pull Requests</th>
-                <th scope="col">Git Commits</th>
+                <th scope="col">Commit Activities</th>
                 <th scope="col">Python Code &amp; Tests</th>
               </tr>
             </thead>
@@ -645,17 +645,17 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                   </td>
                   <td>
                     <div class="chip-group">
-                      {row.commits.length === 0 ? (
+                      {row.commitActivities.length === 0 ? (
                         <span style="color: var(--text-muted);">—</span>
                       ) : (
-                        row.commits.map((c) => (
+                        row.commitActivities.map((c) => (
                           <button
                             type="button"
                             key={c.id}
                             class="entity-chip"
                             {...dsClick(`@get('/api/focus?id=${encodeURIComponent(c.id)}')`)}
                           >
-                            {String(c.attributes.shortSha)}
+                            ⚡ {String(c.attributes.shortSha)}
                           </button>
                         ))
                       )}

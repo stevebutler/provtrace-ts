@@ -25,8 +25,9 @@ export interface GraphLayoutResult {
 function getColumnForNode(node: ProvGraphNode): number {
   if (node.kind === "agent") return 0;
   if (node.kind === "activity") {
-    if (node.subType === "IssueReport" || node.subType === "IssueResolution") return 1;
-    return 3;
+    if (node.subType === "PullRequestReview") return 4;
+    if (node.subType === "IssueReport" || node.subType === "IssueResolution") return 0;
+    return 2; // CommitActivity & SpecAuthoring bridge specs/issues -> generated files
   }
   switch (node.subType) {
     case "Issue":
@@ -35,12 +36,10 @@ function getColumnForNode(node: ProvGraphNode): number {
     case "DocumentRevision":
     case "Requirement":
       return 1;
-    case "PullRequest":
-      return 2;
-    case "Commit":
-      return 3;
     case "CodeArtifact":
     case "TestArtifact":
+      return 3;
+    case "PullRequest":
     default:
       return 4;
   }
@@ -49,9 +48,9 @@ function getColumnForNode(node: ProvGraphNode): number {
 const COLUMN_TITLES: Record<number, string> = {
   0: "Issues & Agents",
   1: "Specs & Requirements",
-  2: "Pull Requests",
-  3: "Commits & Activities",
-  4: "Code & Test Artifacts",
+  2: "Commit Activities",
+  3: "Code & Test Files",
+  4: "Pull Requests",
 };
 
 export function computeProvGraphLayout(
@@ -66,7 +65,6 @@ export function computeProvGraphLayout(
     colBuckets.get(col)!.push(node);
   }
 
-  // Keep only non-empty columns so focused subgraphs stay compact
   const activeCols = [...colBuckets.entries()]
     .filter(([, list]) => list.length > 0)
     .map(([col, list]) => ({ col, list }));
@@ -132,7 +130,6 @@ export function computeProvGraphLayout(
       x2 = dst.x;
       y2 = dst.y + dst.height / 2;
     } else {
-      // Same column vertical curve on right side
       x1 = src.x + src.width;
       y1 = src.y + src.height / 2;
       x2 = dst.x + dst.width;

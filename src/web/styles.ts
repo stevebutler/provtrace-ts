@@ -594,7 +594,7 @@ table.data-table tbody th {
     --label-2: "Status";
     --label-3: "GitHub Issues";
     --label-4: "Pull Requests";
-    --label-5: "Commits";
+    --label-5: "Commit Activities";
     --label-6: "Code & Tests";
   }
 

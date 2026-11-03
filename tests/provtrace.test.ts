@@ -20,6 +20,11 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   assert.equal(stats.requirementsVerified, 2); // REQ-001, REQ-002 have unit tests
   assert.ok(stats.entities >= 20);
   assert.ok(stats.relations >= 50);
+  assert.equal(
+    store.getEntities().filter((e) => e.id.startsWith("entity:commit:")).length,
+    0,
+    "Commits should be modeled strictly as prov:Activity, not prov:Entity"
+  );
 
   const matrix = store.getRequirementsMatrix();
   const byCode = new Map(matrix.map((r) => [r.code, r]));

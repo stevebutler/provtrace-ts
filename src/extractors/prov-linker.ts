@@ -22,6 +22,9 @@ export async function runProvLinker(ctx: ExtractorContext) {
   const { store, stepDelayMs = 0, onStep } = ctx;
 
   const entities = new Map(store.getEntities().map((e) => [e.id, e]));
+  const commitActivities = store
+    .getActivities()
+    .filter((a) => a.activityType === "CommitActivity");
   const agents = store.getAgents();
   const relations = store.getRelations();
 
@@ -79,7 +82,7 @@ export async function runProvLinker(ctx: ExtractorContext) {
     items++;
   }
 
-  // Also check Issue bodies referencing other issues or REQ-* codes
+  // Check Issue bodies referencing other issues or REQ-* codes
   const issues = [...store.getEntities("Issue"), ...store.getEntities("Bug")];
   for (const issue of issues) {
     const body = String(issue.attributes.body ?? "");
@@ -99,7 +102,6 @@ export async function runProvLinker(ctx: ExtractorContext) {
     for (const reqCode of extractReqCodes(body)) {
       const reqId = `entity:req:${reqCode}`;
       if (entities.has(reqId)) {
-        // If REQ wasn't already derived from this issue, then this issue refines/tracks the REQ
         const reqAlreadyDerivedFromIssue =
           (entities.get(reqId)?.attributes.sourceRefs as string[] | undefined)?.includes(
             String(issueNum)
@@ -127,25 +129,22 @@ export async function runProvLinker(ctx: ExtractorContext) {
   });
   await sleep(stepDelayMs);
 
-  // Step 3: Link Git Commits & File Revisions -> Issues and Requirements
-  const commits = store.getEntities("Commit");
-  const filesByCommit = new Map<string, string[]>();
+  // Step 3: Link CommitActivity & generated file Entities -> Issues and Requirements
+  const filesByCommitActivity = new Map<string, string[]>();
   for (const r of relations) {
     if (
-      r.relationType === "wasDerivedFrom" &&
+      r.relationType === "wasGeneratedBy" &&
       r.subjectId.startsWith("entity:file:") &&
-      r.objectId.startsWith("entity:commit:")
+      r.objectId.startsWith("activity:commit:")
     ) {
-      if (!filesByCommit.has(r.objectId)) filesByCommit.set(r.objectId, []);
-      filesByCommit.get(r.objectId)!.push(r.subjectId);
+      if (!filesByCommitActivity.has(r.objectId)) filesByCommitActivity.set(r.objectId, []);
+      filesByCommitActivity.get(r.objectId)!.push(r.subjectId);
     }
   }
 
-  for (const commit of commits) {
-    const fullMsg = String(commit.attributes.fullMessage ?? commit.label);
-    const shortSha = String(commit.attributes.shortSha ?? "");
-    const commitActivityId = `activity:commit:${shortSha}`;
-    const generatedFiles = filesByCommit.get(commit.id) ?? [];
+  for (const commitAct of commitActivities) {
+    const fullMsg = String(commitAct.attributes.fullMessage ?? commitAct.label);
+    const generatedFiles = filesByCommitActivity.get(commitAct.id) ?? [];
 
     const issueNums = extractIssueRefs(fullMsg);
     const reqCodes = extractReqCodes(fullMsg);
@@ -155,38 +154,33 @@ export async function runProvLinker(ctx: ExtractorContext) {
       if (!entities.has(issueId)) continue;
 
       store.addRelation({
-        relationType: "wasDerivedFrom",
-        subjectId: commit.id,
-        objectId: issueId,
-        role: "provtrace:addressesIssue",
-        attributes: {},
-      });
-      store.addRelation({
         relationType: "used",
-        subjectId: commitActivityId,
+        subjectId: commitAct.id,
         objectId: issueId,
         attributes: {},
       });
       store.addRelation({
         relationType: "wasInformedBy",
-        subjectId: commitActivityId,
+        subjectId: commitAct.id,
         objectId: `activity:issue-report:${num}`,
         attributes: {},
       });
-      relCount += 3;
+      relCount += 2;
 
       for (const fileEntityId of generatedFiles) {
         const fileEnt = entities.get(fileEntityId);
-        if (fileEnt && fileEnt.entityType !== "DocumentRevision") {
-          store.addRelation({
-            relationType: "wasDerivedFrom",
-            subjectId: fileEntityId,
-            objectId: issueId,
-            role: "provtrace:implementsIssue",
-            attributes: {},
-          });
-          relCount++;
-        }
+        if (!fileEnt) continue;
+        store.addRelation({
+          relationType: "wasDerivedFrom",
+          subjectId: fileEntityId,
+          objectId: issueId,
+          role:
+            fileEnt.entityType === "DocumentRevision"
+              ? "provtrace:documentsIssue"
+              : "provtrace:implementsIssue",
+          attributes: {},
+        });
+        relCount++;
       }
     }
 
@@ -194,25 +188,17 @@ export async function runProvLinker(ctx: ExtractorContext) {
       const reqId = `entity:req:${code}`;
       if (!entities.has(reqId)) continue;
 
-      // Avoid cycle if commit itself only authored the doc defining that REQ
       const nonDocFiles = generatedFiles.filter(
         (fid) => entities.get(fid)?.entityType !== "DocumentRevision"
       );
       if (nonDocFiles.length > 0) {
         store.addRelation({
-          relationType: "wasDerivedFrom",
-          subjectId: commit.id,
-          objectId: reqId,
-          role: "provtrace:implementsRequirement",
-          attributes: {},
-        });
-        store.addRelation({
           relationType: "used",
-          subjectId: commitActivityId,
+          subjectId: commitAct.id,
           objectId: reqId,
           attributes: {},
         });
-        relCount += 2;
+        relCount++;
 
         for (const fileEntityId of nonDocFiles) {
           store.addRelation({
@@ -233,11 +219,11 @@ export async function runProvLinker(ctx: ExtractorContext) {
     progressPct: 80,
     itemsProcessed: items,
     relationsCreated: relCount,
-    message: `Linked Git commits and source/test artifacts to requirements & issues`,
+    message: `Linked commit activities and generated files to requirements & issues`,
   });
   await sleep(stepDelayMs);
 
-  // Step 4: Link Pull Requests -> Commits & Issues
+  // Step 4: Link Pull Requests -> CommitActivities, Generated Files & Issues
   const pullRequests = store.getEntities("PullRequest");
   for (const pr of pullRequests) {
     const closesIssues = (pr.attributes.closes_issues as number[] | undefined) ?? [];
@@ -266,31 +252,34 @@ export async function runProvLinker(ctx: ExtractorContext) {
     }
 
     if (subjectMatch) {
-      const matchingCommit = commits.find((c) =>
+      const matchingCommitAct = commitActivities.find((c) =>
         String(c.attributes.subject ?? "").includes(subjectMatch)
       );
-      if (matchingCommit) {
-        const shortSha = String(matchingCommit.attributes.shortSha ?? "");
-        store.addRelation({
-          relationType: "wasDerivedFrom",
-          subjectId: pr.id,
-          objectId: matchingCommit.id,
-          role: "provtrace:headCommit",
-          attributes: {},
-        });
-        store.addRelation({
-          relationType: "used",
-          subjectId: reviewActId,
-          objectId: matchingCommit.id,
-          attributes: {},
-        });
+      if (matchingCommitAct) {
         store.addRelation({
           relationType: "wasInformedBy",
           subjectId: reviewActId,
-          objectId: `activity:commit:${shortSha}`,
+          objectId: matchingCommitAct.id,
           attributes: {},
         });
-        relCount += 3;
+        relCount++;
+
+        for (const fileEntityId of filesByCommitActivity.get(matchingCommitAct.id) ?? []) {
+          store.addRelation({
+            relationType: "wasDerivedFrom",
+            subjectId: pr.id,
+            objectId: fileEntityId,
+            role: "provtrace:proposesArtifact",
+            attributes: {},
+          });
+          store.addRelation({
+            relationType: "used",
+            subjectId: reviewActId,
+            objectId: fileEntityId,
+            attributes: {},
+          });
+          relCount += 2;
+        }
       }
     }
     items++;

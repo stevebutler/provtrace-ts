@@ -26,7 +26,8 @@ export const LOADER_DEFINITIONS: Array<{
   {
     loaderName: "git-commits",
     title: "Git Repository Extractor",
-    description: "Extracts commits, file revisions, commit activities, and author agents from target-project.",
+    description:
+      "Extracts commit activities (prov:Activity), file revisions (prov:Entity), and Git author agents.",
   },
   {
     loaderName: "asciidoc-specs",
@@ -41,7 +42,7 @@ export const LOADER_DEFINITIONS: Array<{
   {
     loaderName: "prov-linker",
     title: "W3C PROV Cross-Source Linker",
-    description: "Connects Issues, Requirements, PRs, Commits, Code, and Tests via wasDerivedFrom & used.",
+    description: "Connects Issues, Requirements, Commit Activities, PRs, Code, and Tests via PROV relations.",
   },
 ];
 
@@ -382,25 +383,26 @@ export class ProvStore {
     const requirementsImplemented = matrix.filter((r) => r.compliance !== "unimplemented").length;
     const requirementsVerified = matrix.filter((r) => r.compliance === "verified").length;
 
-    const commits = this.getEntities("Commit");
+    const commitActivities = this.getActivities().filter(
+      (a) => a.activityType === "CommitActivity"
+    );
     const relations = this.getRelations();
     const tracedCommitIds = new Set(
       relations
         .filter(
           (rel) =>
-            rel.relationType === "wasDerivedFrom" &&
-            rel.subjectId.startsWith("entity:commit:") &&
+            rel.relationType === "used" &&
+            rel.subjectId.startsWith("activity:commit:") &&
             (rel.objectId.startsWith("entity:issue:") || rel.objectId.startsWith("entity:req:"))
         )
         .map((rel) => rel.subjectId)
     );
     const tracedCommitsPct =
-      commits.length > 0 ? Math.round((tracedCommitIds.size / commits.length) * 100) : 0;
+      commitActivities.length > 0
+        ? Math.round((tracedCommitIds.size / commitActivities.length) * 100)
+        : 0;
 
-    const issues = [
-      ...this.getEntities("Issue"),
-      ...this.getEntities("Bug"),
-    ];
+    const issues = [...this.getEntities("Issue"), ...this.getEntities("Bug")];
     const leadHours: number[] = [];
     for (const issue of issues) {
       const closedAt = issue.attributes.closed_at as string | null | undefined;
@@ -432,11 +434,11 @@ export class ProvStore {
   getRequirementsMatrix(): RequirementTraceRow[] {
     const requirements = this.getEntities("Requirement");
     const allEntities = new Map(this.getEntities().map((e) => [e.id, e]));
-    const derivedRels = this.getRelations().filter((r) => r.relationType === "wasDerivedFrom");
+    const allActivities = new Map(this.getActivities().map((a) => [a.id, a]));
+    const allRelations = this.getRelations();
+    const derivedRels = allRelations.filter((r) => r.relationType === "wasDerivedFrom");
 
-    // Build reverse derivation adjacency: objectId <- subjectId (things derived FROM objectId)
     const derivedFromObject = new Map<string, Set<string>>();
-    // And forward derivation: subjectId -> objectId (things subjectId was derived FROM)
     const derivedTargets = new Map<string, Set<string>>();
 
     for (const rel of derivedRels) {
@@ -460,7 +462,6 @@ export class ProvStore {
         }
       }
 
-      // Issues can be upstream of REQ (REQ derivedFrom Issue) OR downstream (Issue references REQ)
       const linkedIssueIds = new Set<string>();
       for (const up of derivedTargets.get(req.id) ?? []) {
         if (up.startsWith("entity:issue:")) linkedIssueIds.add(up);
@@ -469,18 +470,22 @@ export class ProvStore {
         if (down.startsWith("entity:issue:")) linkedIssueIds.add(down);
       }
 
-      // Also include PRs derived from commits/issues linked to this requirement
-      const commits: ProvEntity[] = [];
       const codeFiles: ProvEntity[] = [];
       const testFiles: ProvEntity[] = [];
       const pullRequestIds = new Set<string>();
+      const artifactIds = new Set<string>();
 
       for (const id of downstream) {
         const ent = allEntities.get(id);
         if (!ent) continue;
-        if (ent.entityType === "Commit") commits.push(ent);
-        if (ent.entityType === "CodeArtifact") codeFiles.push(ent);
-        if (ent.entityType === "TestArtifact") testFiles.push(ent);
+        if (ent.entityType === "CodeArtifact") {
+          codeFiles.push(ent);
+          artifactIds.add(ent.id);
+        }
+        if (ent.entityType === "TestArtifact") {
+          testFiles.push(ent);
+          artifactIds.add(ent.id);
+        }
         if (ent.entityType === "PullRequest") pullRequestIds.add(ent.id);
       }
 
@@ -490,6 +495,29 @@ export class ProvStore {
           if (ent?.entityType === "PullRequest") pullRequestIds.add(ent.id);
         }
       }
+
+      // Collect CommitActivities that used this requirement or generated its code/test artifacts
+      const commitActIds = new Set<string>();
+      for (const rel of allRelations) {
+        if (
+          rel.relationType === "used" &&
+          rel.objectId === req.id &&
+          rel.subjectId.startsWith("activity:commit:")
+        ) {
+          commitActIds.add(rel.subjectId);
+        }
+        if (
+          rel.relationType === "wasGeneratedBy" &&
+          artifactIds.has(rel.subjectId) &&
+          rel.objectId.startsWith("activity:commit:")
+        ) {
+          commitActIds.add(rel.objectId);
+        }
+      }
+
+      const commitActivities = [...commitActIds]
+        .map((id) => allActivities.get(id))
+        .filter((a): a is ProvActivity => Boolean(a));
 
       const issues = [...linkedIssueIds]
         .map((id) => allEntities.get(id))
@@ -512,7 +540,7 @@ export class ProvStore {
         specStatus: String(req.attributes.status ?? "Draft"),
         issues,
         pullRequests,
-        commits,
+        commitActivities,
         codeFiles,
         testFiles,
         compliance,
@@ -523,29 +551,30 @@ export class ProvStore {
   getProcessAnomalies(): ProcessAnomaly[] {
     const anomalies: ProcessAnomaly[] = [];
     const relations = this.getRelations();
-    const entities = new Map(this.getEntities().map((e) => [e.id, e]));
 
-    // 1. Untracked commits touching production code without Issue or Requirement derivation
-    const commits = this.getEntities("Commit");
-    for (const commit of commits) {
-      const files = (commit.attributes.files as string[] | undefined) ?? [];
+    // 1. Untracked CommitActivities touching production code without using an Issue or Requirement
+    const commitActivities = this.getActivities().filter(
+      (a) => a.activityType === "CommitActivity"
+    );
+    for (const commitAct of commitActivities) {
+      const files = (commitAct.attributes.files as string[] | undefined) ?? [];
       const touchesSrc = files.some((f) => f.startsWith("src/") && !f.endsWith("__init__.py"));
       if (!touchesSrc) continue;
 
-      const hasGovernanceLink = relations.some(
+      const hasGovernanceInput = relations.some(
         (r) =>
-          r.relationType === "wasDerivedFrom" &&
-          r.subjectId === commit.id &&
+          r.relationType === "used" &&
+          r.subjectId === commitAct.id &&
           (r.objectId.startsWith("entity:issue:") || r.objectId.startsWith("entity:req:"))
       );
 
-      if (!hasGovernanceLink) {
+      if (!hasGovernanceInput) {
         anomalies.push({
           severity: "high",
           category: "Untracked Work",
-          entityId: commit.id,
-          label: commit.label,
-          detail: `Modifies production source (${files.join(", ")}) with no prov:wasDerivedFrom link to any GitHub Issue or AsciiDoc Requirement.`,
+          nodeId: commitAct.id,
+          label: commitAct.label,
+          detail: `Commit activity modifies production source (${files.join(", ")}) with no prov:used link to any GitHub Issue or AsciiDoc Requirement.`,
         });
       }
     }
@@ -556,7 +585,7 @@ export class ProvStore {
         anomalies.push({
           severity: "medium",
           category: "Unimplemented Spec",
-          entityId: row.reqId,
+          nodeId: row.reqId,
           label: `${row.code}: ${row.title}`,
           detail: `Defined in AsciiDoc (${row.specStatus}) with ${row.issues.length} linked issue(s), but zero derived CodeArtifact entities exist.`,
         });
@@ -565,15 +594,13 @@ export class ProvStore {
         anomalies.push({
           severity: "medium",
           category: "Missing Test Coverage",
-          entityId: row.reqId,
+          nodeId: row.reqId,
           label: `${row.code}: ${row.title}`,
-          detail: `Implemented in ${fileNames}, but no TestArtifact derives from this requirement or its commits.`,
+          detail: `Implemented in ${fileNames}, but no TestArtifact derives from this requirement or its commit activities.`,
         });
       }
     }
 
-    // Suppress unused warning if entities map is helpful later
-    void entities;
     return anomalies;
   }
 
@@ -645,12 +672,10 @@ export class ProvStore {
       });
     }
 
-    // For visual clarity in overview mode, focus on core artifact lineage (Entities + Activities/Agents when focused)
     const allRelations = this.getRelations();
 
     if (focusId && allNodes.has(focusId)) {
       const keep = new Set<string>([focusId]);
-      // Traverse 2 hops undirected around focusId
       let frontier = new Set<string>([focusId]);
       for (let hop = 0; hop < 2; hop++) {
         const next = new Set<string>();
@@ -683,16 +708,26 @@ export class ProvStore {
       return { nodes, edges };
     }
 
-    // Overview graph: show Entities connected by wasDerivedFrom so the end-to-end artifact lineage is crisp
-    const entityNodes = [...allNodes.values()].filter((n) => n.kind === "entity");
-    const entitySet = new Set(entityNodes.map((n) => n.id));
+    // Overview graph: show Entities + CommitActivities bridged by wasGeneratedBy, used, and direct structural wasDerivedFrom
+    const overviewNodes = [...allNodes.values()].filter(
+      (n) => n.kind === "entity" || (n.kind === "activity" && n.subType === "CommitActivity")
+    );
+    const overviewSet = new Set(overviewNodes.map((n) => n.id));
+    const skippedShortcutRoles = new Set([
+      "provtrace:satisfiesRequirement",
+      "provtrace:implementsIssue",
+      "provtrace:documentsIssue",
+    ]);
+
     const edges = allRelations
-      .filter(
-        (r) =>
-          r.relationType === "wasDerivedFrom" &&
-          entitySet.has(r.subjectId) &&
-          entitySet.has(r.objectId)
-      )
+      .filter((r) => {
+        if (!overviewSet.has(r.subjectId) || !overviewSet.has(r.objectId)) return false;
+        if (r.relationType === "wasGeneratedBy" || r.relationType === "used") return true;
+        if (r.relationType === "wasDerivedFrom") {
+          return !skippedShortcutRoles.has(r.role ?? "");
+        }
+        return false;
+      })
       .map((r) => ({
         relationType: r.relationType,
         from: r.subjectId,
@@ -700,7 +735,7 @@ export class ProvStore {
         role: r.role,
       }));
 
-    return { nodes: entityNodes, edges };
+    return { nodes: overviewNodes, edges };
   }
 
   inspectNode(id: string) {

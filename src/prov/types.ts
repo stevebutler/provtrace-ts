@@ -4,7 +4,6 @@ export type EntityType =
   | "Requirement"
   | "DocumentRevision"
   | "PullRequest"
-  | "Commit"
   | "CodeArtifact"
   | "TestArtifact";
 
@@ -96,7 +95,7 @@ export interface RequirementTraceRow {
   specStatus: string;
   issues: ProvEntity[];
   pullRequests: ProvEntity[];
-  commits: ProvEntity[];
+  commitActivities: ProvActivity[];
   codeFiles: ProvEntity[];
   testFiles: ProvEntity[];
   compliance: "verified" | "untested" | "unimplemented";
@@ -105,7 +104,7 @@ export interface RequirementTraceRow {
 export interface ProcessAnomaly {
   severity: "high" | "medium" | "low";
   category: "Untracked Work" | "Unimplemented Spec" | "Missing Test Coverage";
-  entityId: string;
+  nodeId: string;
   label: string;
   detail: string;
 }

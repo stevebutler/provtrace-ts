@@ -56,6 +56,13 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
     );
   }
 
+  // Verify prov:Collection membership (hadMember) for AsciiDoc documents -> Requirements and PRs -> file revisions
+  const memberRels = store.getRelations().filter((r) => r.relationType === "hadMember");
+  const docMemberRels = memberRels.filter((r) => r.subjectId.startsWith("entity:file:docs/"));
+  const prMemberRels = memberRels.filter((r) => r.subjectId.startsWith("entity:pr:"));
+  assert.equal(docMemberRels.length, 4, "AsciiDoc spec collection should contain all 4 requirements");
+  assert.equal(prMemberRels.length, 5, "PRs #10 (2 files), #11 (2 files), and #12 (1 file) should contain 5 member file revisions");
+
   const matrix = store.getRequirementsMatrix();
   const byCode = new Map(matrix.map((r) => [r.code, r]));
 
@@ -135,4 +142,5 @@ test("Hono + JSX + Datastar routes render full page, focus fragments, and PROV-J
   const provDoc = (await provRes.json()) as Record<string, unknown>;
   assert.ok(provDoc.entity);
   assert.ok(provDoc.wasDerivedFrom);
+  assert.ok(provDoc.hadMember);
 });

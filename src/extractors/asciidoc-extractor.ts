@@ -112,10 +112,10 @@ export async function runAsciiDocExtractor(ctx: ExtractorContext) {
 
       if (latestDocRev) {
         store.addRelation({
-          relationType: "wasDerivedFrom",
-          subjectId: reqEntityId,
-          objectId: latestDocRev.id,
-          role: "provtrace:definedInDocument",
+          relationType: "hadMember",
+          subjectId: latestDocRev.id,
+          objectId: reqEntityId,
+          role: "prov:Collection",
           attributes: {},
         });
         relations++;

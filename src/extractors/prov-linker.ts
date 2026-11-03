@@ -266,10 +266,10 @@ export async function runProvLinker(ctx: ExtractorContext) {
 
         for (const fileEntityId of filesByCommitActivity.get(matchingCommitAct.id) ?? []) {
           store.addRelation({
-            relationType: "wasDerivedFrom",
+            relationType: "hadMember",
             subjectId: pr.id,
             objectId: fileEntityId,
-            role: "provtrace:proposesArtifact",
+            role: "prov:Collection",
             attributes: {},
           });
           store.addRelation({

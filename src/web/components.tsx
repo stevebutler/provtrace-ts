@@ -16,6 +16,8 @@ function edgeColor(relType: string): string {
       return "#2563eb";
     case "wasRevisionOf":
       return "#0891b2";
+    case "hadMember":
+      return "#ca8a04";
     case "wasGeneratedBy":
       return "#16a34a";
     case "used":
@@ -350,6 +352,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
         </span>
         <span style="color: #2563eb;">● wasDerivedFrom</span>
         <span style="color: #0891b2;">● wasRevisionOf</span>
+        <span style="color: #ca8a04;">● hadMember</span>
         <span style="color: #16a34a;">● wasGeneratedBy</span>
         <span style="color: #9333ea;">● used</span>
         <span style="color: #ea580c;">● attribution / agent</span>
@@ -374,6 +377,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                 {[
                   "wasDerivedFrom",
                   "wasRevisionOf",
+                  "hadMember",
                   "wasGeneratedBy",
                   "used",
                   "wasAttributedTo",
@@ -414,6 +418,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                 const markerKey = [
                   "wasDerivedFrom",
                   "wasRevisionOf",
+                  "hadMember",
                   "wasGeneratedBy",
                   "used",
                   "wasAttributedTo",

@@ -500,6 +500,17 @@ export class ProvStore {
         }
       }
 
+      // Also include any PullRequest (prov:Collection) that contains a generated artifact via hadMember
+      for (const rel of allRelations) {
+        if (
+          rel.relationType === "hadMember" &&
+          artifactIds.has(rel.objectId) &&
+          rel.subjectId.startsWith("entity:pr:")
+        ) {
+          pullRequestIds.add(rel.subjectId);
+        }
+      }
+
       // Collect CommitActivities that used this requirement or generated its code/test artifacts
       const commitActIds = new Set<string>();
       for (const rel of allRelations) {
@@ -689,7 +700,8 @@ export class ProvStore {
         if (
           r.relationType === "wasGeneratedBy" ||
           r.relationType === "used" ||
-          r.relationType === "wasRevisionOf"
+          r.relationType === "wasRevisionOf" ||
+          r.relationType === "hadMember"
         ) {
           return true;
         }
@@ -737,8 +749,12 @@ export class ProvStore {
   exportProvJson() {
     const entity: Record<string, unknown> = {};
     for (const e of this.getEntities()) {
+      const isCollection =
+        e.entityType === "DocumentRevision" || e.entityType === "PullRequest";
       entity[e.id] = {
-        "prov:type": `provtrace:${e.entityType}`,
+        "prov:type": isCollection
+          ? ["prov:Collection", `provtrace:${e.entityType}`]
+          : `provtrace:${e.entityType}`,
         "prov:label": e.label,
         "provtrace:source": e.source,
         ...(e.createdAt ? { "provtrace:createdAt": e.createdAt } : {}),
@@ -768,6 +784,7 @@ export class ProvStore {
 
     const grouped: Record<string, Record<string, unknown>> = {
       wasDerivedFrom: {},
+      hadMember: {},
       wasGeneratedBy: {},
       used: {},
       wasAttributedTo: {},
@@ -791,6 +808,12 @@ export class ProvStore {
             "prov:generatedEntity": rel.subjectId,
             "prov:usedEntity": rel.objectId,
             "prov:type": "prov:Revision",
+          };
+          break;
+        case "hadMember":
+          grouped.hadMember[key] = {
+            "prov:collection": rel.subjectId,
+            "prov:entity": rel.objectId,
           };
           break;
         case "wasGeneratedBy":

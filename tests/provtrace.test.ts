@@ -81,15 +81,32 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   );
 
   const anomalies = store.getProcessAnomalies();
-  assert.equal(GOVERNANCE_RULES.length, 3);
+  assert.equal(GOVERNANCE_RULES.length, 4);
   assert.deepEqual(
     anomalies.map((a) => a.ruleId),
-    ["GOV-001", "GOV-002", "GOV-003"]
+    ["GOV-001", "GOV-002", "GOV-003", "GOV-004"]
   );
   const categories = anomalies.map((a) => a.category);
   assert.ok(categories.includes("Untracked Work"), "Should detect untracked CLI commit");
   assert.ok(categories.includes("Unimplemented Spec"), "Should detect unimplemented REQ-004");
   assert.ok(categories.includes("Missing Test Coverage"), "Should detect untested REQ-003");
+  assert.ok(categories.includes("Four-Eyes Review"), "Should detect self-reviewed PR #11");
+  assert.equal(
+    anomalies.find((a) => a.ruleId === "GOV-004")?.nodeId,
+    "entity:pr:11",
+    "PR #11 should be flagged for self-review while PR #10 (reviewed by carol-qa) passes"
+  );
+
+  // Verify same agent can hold multiple qualified prov:Association roles (author + reviewer on PR #11)
+  const pr11Assocs = store
+    .getRelations()
+    .filter(
+      (r) => r.relationType === "wasAssociatedWith" && r.subjectId === "activity:pr-review:11"
+    );
+  assert.deepEqual(
+    pr11Assocs.map((r) => r.role).sort(),
+    ["author", "reviewer"]
+  );
 
   // Verify custom rules drive both getProcessAnomalies AND getRequirementsMatrix compliance
   const customRule: GovernanceRule = {

@@ -224,7 +224,10 @@ export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
         <ul class="rel-list">
           {info.outgoing.map((r) => (
             <li class="rel-item" key={r.id}>
-              <span class="badge neutral">{r.relationType}</span>
+              <span class="badge neutral">
+                {r.relationType}
+                {r.role && !r.role.includes(":") ? ` (${r.role})` : ""}
+              </span>
               <span>→</span>
               <button
                 type="button"
@@ -257,7 +260,10 @@ export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
                 {truncate(r.sourceLabel, 38)}
               </button>
               <span>—</span>
-              <span class="badge neutral">{r.relationType}</span>
+              <span class="badge neutral">
+                {r.relationType}
+                {r.role && !r.role.includes(":") ? ` (${r.role})` : ""}
+              </span>
             </li>
           ))}
         </ul>
@@ -750,7 +756,7 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
               </tr>
             </thead>
             <tbody>
-              {timeline.map(({ activity, agent, usedEntities, generatedEntities }) => (
+              {timeline.map(({ activity, associations, usedEntities, generatedEntities }) => (
                 <tr key={activity.id}>
                   <th scope="row">
                     <button
@@ -767,7 +773,25 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                   <td>
                     <span class="badge neutral">{activity.activityType}</span>
                   </td>
-                  <td>{agent ? agent.label : "—"}</td>
+                  <td>
+                    {associations.length === 0 ? (
+                      "—"
+                    ) : (
+                      <div class="chip-group">
+                        {associations.map((assoc) => (
+                          <button
+                            type="button"
+                            key={`${assoc.agent.id}-${assoc.role ?? ""}`}
+                            class="entity-chip"
+                            {...dsClick(`@get('/api/focus?id=${encodeURIComponent(assoc.agent.id)}')`)}
+                          >
+                            {truncate(assoc.agent.label, 22)}
+                            {assoc.role ? ` (${assoc.role})` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td>
                     <div class="chip-group">
                       {usedEntities.slice(0, 3).map((u) => (

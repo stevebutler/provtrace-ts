@@ -94,9 +94,9 @@ export class ProvStore {
         relation_type TEXT NOT NULL,
         subject_id TEXT NOT NULL,
         object_id TEXT NOT NULL,
-        role TEXT,
+        role TEXT NOT NULL DEFAULT '',
         attributes_json TEXT NOT NULL DEFAULT '{}',
-        UNIQUE(relation_type, subject_id, object_id)
+        UNIQUE(relation_type, subject_id, object_id, role)
       );
 
       CREATE TABLE IF NOT EXISTS loader_status (
@@ -121,6 +121,29 @@ export class ProvStore {
         message TEXT NOT NULL
       );
     `);
+
+    // Upgrade existing SQLite prov_relations schema if created before qualified-role uniqueness
+    const relTableMeta = this.db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'prov_relations'`)
+      .get() as { sql?: string } | undefined;
+    if (relTableMeta?.sql && !relTableMeta.sql.includes("subject_id, object_id, role")) {
+      this.db.exec(`
+        ALTER TABLE prov_relations RENAME TO prov_relations_legacy;
+        CREATE TABLE prov_relations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          relation_type TEXT NOT NULL,
+          subject_id TEXT NOT NULL,
+          object_id TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT '',
+          attributes_json TEXT NOT NULL DEFAULT '{}',
+          UNIQUE(relation_type, subject_id, object_id, role)
+        );
+        INSERT OR IGNORE INTO prov_relations (id, relation_type, subject_id, object_id, role, attributes_json)
+          SELECT id, relation_type, subject_id, object_id, COALESCE(role, ''), attributes_json
+          FROM prov_relations_legacy;
+        DROP TABLE prov_relations_legacy;
+      `);
+    }
 
     const stmt = this.db.prepare(`
       INSERT INTO loader_status (loader_name, title, description)
@@ -217,15 +240,14 @@ export class ProvStore {
       .prepare(
         `INSERT INTO prov_relations (relation_type, subject_id, object_id, role, attributes_json)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(relation_type, subject_id, object_id) DO UPDATE SET
-           role = excluded.role,
+         ON CONFLICT(relation_type, subject_id, object_id, role) DO UPDATE SET
            attributes_json = excluded.attributes_json`
       )
       .run(
         rel.relationType,
         rel.subjectId,
         rel.objectId,
-        rel.role ?? null,
+        rel.role ?? "",
         JSON.stringify(rel.attributes ?? {})
       );
     return Number(res.changes) > 0;
@@ -369,7 +391,7 @@ export class ProvStore {
       relationType: r.relation_type as ProvRelationType,
       subjectId: String(r.subject_id),
       objectId: String(r.object_id),
-      role: (r.role as string | null) ?? null,
+      role: r.role ? String(r.role) : null,
       attributes: JSON.parse(String(r.attributes_json || "{}")),
     }));
   }
@@ -587,10 +609,15 @@ export class ProvStore {
 
     return activities
       .map((act) => {
-        const assocRel = relations.find(
-          (r) => r.relationType === "wasAssociatedWith" && r.subjectId === act.id
-        );
-        const agent = assocRel ? agents.get(assocRel.objectId) ?? null : null;
+        const associations = relations
+          .filter((r) => r.relationType === "wasAssociatedWith" && r.subjectId === act.id)
+          .map((r) => {
+            const ag = agents.get(r.objectId);
+            return ag ? { agent: ag, role: r.role ?? null } : null;
+          })
+          .filter((item): item is { agent: ProvAgent; role: string | null } => Boolean(item));
+
+        const agent = associations[0]?.agent ?? null;
 
         const usedEntities = relations
           .filter((r) => r.relationType === "used" && r.subjectId === act.id)
@@ -605,6 +632,7 @@ export class ProvStore {
         return {
           activity: act,
           agent,
+          associations,
           usedEntities,
           generatedEntities,
         };
@@ -820,12 +848,14 @@ export class ProvStore {
           grouped.wasGeneratedBy[key] = {
             "prov:entity": rel.subjectId,
             "prov:activity": rel.objectId,
+            ...(rel.role ? { "prov:role": rel.role } : {}),
           };
           break;
         case "used":
           grouped.used[key] = {
             "prov:activity": rel.subjectId,
             "prov:entity": rel.objectId,
+            ...(rel.role ? { "prov:role": rel.role } : {}),
           };
           break;
         case "wasAttributedTo":
@@ -838,6 +868,7 @@ export class ProvStore {
           grouped.wasAssociatedWith[key] = {
             "prov:activity": rel.subjectId,
             "prov:agent": rel.objectId,
+            ...(rel.role ? { "prov:role": rel.role } : {}),
           };
           break;
         case "wasInformedBy":

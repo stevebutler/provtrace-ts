@@ -105,6 +105,95 @@ export const missingTestCoverageRule: GovernanceRule = {
   },
 };
 
+export const fourEyesReviewRule: GovernanceRule = {
+  id: "GOV-004",
+  category: "Four-Eyes Review",
+  severity: "high",
+  description:
+    "Every merged PullRequest must have a PullRequestReview activity associated with an independent reviewer agent (role='reviewer') distinct from the PR and commit authors.",
+  evaluate({ entities, agents, relations }) {
+    const findings: GovernanceRuleFinding[] = [];
+    const agentById = new Map(agents.map((a) => [a.id, a]));
+
+    // Map delegate Git agents -> canonical GitHub person agents via prov:actedOnBehalfOf
+    const canonicalAgentId = (agentId: string): string => {
+      const delegateRel = relations.find(
+        (r) => r.relationType === "actedOnBehalfOf" && r.subjectId === agentId
+      );
+      return delegateRel ? delegateRel.objectId : agentId;
+    };
+
+    const mergedPrs = entities.filter(
+      (e) => e.entityType === "PullRequest" && e.attributes.state === "merged"
+    );
+
+    for (const pr of mergedPrs) {
+      const prNum = Number(pr.attributes.number);
+      const reviewActId = `activity:pr-review:${prNum}`;
+
+      const prAssocs = relations.filter(
+        (r) => r.relationType === "wasAssociatedWith" && r.subjectId === reviewActId
+      );
+
+      // Authors include PR author association + commit authors informing this PR review
+      const authorCanonicalIds = new Set<string>();
+      for (const assoc of prAssocs) {
+        if (assoc.role === "author") {
+          authorCanonicalIds.add(canonicalAgentId(assoc.objectId));
+        }
+      }
+
+      const informedCommitIds = relations
+        .filter(
+          (r) =>
+            r.relationType === "wasInformedBy" &&
+            r.subjectId === reviewActId &&
+            r.objectId.startsWith("activity:commit:")
+        )
+        .map((r) => r.objectId);
+
+      for (const commitActId of informedCommitIds) {
+        for (const r of relations) {
+          if (
+            r.relationType === "wasAssociatedWith" &&
+            r.subjectId === commitActId &&
+            r.role === "author"
+          ) {
+            authorCanonicalIds.add(canonicalAgentId(r.objectId));
+          }
+        }
+      }
+
+      const reviewerAssocs = prAssocs.filter((r) => r.role === "reviewer");
+      if (reviewerAssocs.length === 0) {
+        findings.push({
+          nodeId: pr.id,
+          label: pr.label,
+          detail: `Merged pull request has no prov:wasAssociatedWith agent in role "reviewer".`,
+        });
+        continue;
+      }
+
+      const independentReviewers = reviewerAssocs.filter(
+        (r) => !authorCanonicalIds.has(canonicalAgentId(r.objectId))
+      );
+
+      if (independentReviewers.length === 0) {
+        const reviewerNames = reviewerAssocs
+          .map((r) => agentById.get(r.objectId)?.label ?? r.objectId)
+          .join(", ");
+        findings.push({
+          nodeId: pr.id,
+          label: pr.label,
+          detail: `Merged pull request was reviewed by ${reviewerNames} (role="reviewer"), who also authored the underlying changes (violates 4-eyes segregation of duties).`,
+        });
+      }
+    }
+
+    return findings;
+  },
+};
+
 /**
  * Central registry of software development process-mining governance rules.
  * Add new GovernanceRule definitions here to include them automatically in reports, matrix compliance, and CLI checks.
@@ -113,6 +202,7 @@ export const GOVERNANCE_RULES: readonly GovernanceRule[] = [
   untrackedWorkRule,
   unimplementedSpecRule,
   missingTestCoverageRule,
+  fourEyesReviewRule,
 ];
 
 export function evaluateGovernanceRules(

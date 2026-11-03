@@ -213,11 +213,22 @@ export async function runGitHubExtractor(ctx: ExtractorContext) {
     store.addRelation({
       relationType: "wasAssociatedWith",
       subjectId: reviewActivityId,
-      objectId: pr.reviewer ? `agent:github:${pr.reviewer}` : prAuthorId,
-      role: pr.reviewer ? "reviewer" : "author",
+      objectId: prAuthorId,
+      role: "author",
       attributes: {},
     });
     relations += 3;
+
+    if (pr.reviewer) {
+      store.addRelation({
+        relationType: "wasAssociatedWith",
+        subjectId: reviewActivityId,
+        objectId: `agent:github:${pr.reviewer}`,
+        role: "reviewer",
+        attributes: {},
+      });
+      relations++;
+    }
 
     step++;
     await onStep?.({

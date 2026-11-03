@@ -18,6 +18,7 @@ export type AgentType = "Person" | "SoftwareAgent";
 
 export type ProvRelationType =
   | "wasDerivedFrom"
+  | "wasRevisionOf"
   | "wasGeneratedBy"
   | "used"
   | "wasAttributedTo"

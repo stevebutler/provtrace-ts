@@ -153,7 +153,7 @@ export async function runGitExtractor(ctx: ExtractorContext) {
       const prevFileId = previousFileRevision.get(filePath);
       if (prevFileId) {
         store.addRelation({
-          relationType: "wasDerivedFrom",
+          relationType: "wasRevisionOf",
           subjectId: fileEntityId,
           objectId: prevFileId,
           role: "prov:Revision",

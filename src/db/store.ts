@@ -438,7 +438,9 @@ export class ProvStore {
     const allEntities = new Map(this.getEntities().map((e) => [e.id, e]));
     const allActivities = new Map(this.getActivities().map((a) => [a.id, a]));
     const allRelations = this.getRelations();
-    const derivedRels = allRelations.filter((r) => r.relationType === "wasDerivedFrom");
+    const derivedRels = allRelations.filter(
+      (r) => r.relationType === "wasDerivedFrom" || r.relationType === "wasRevisionOf"
+    );
 
     const derivedFromObject = new Map<string, Set<string>>();
     const derivedTargets = new Map<string, Set<string>>();
@@ -684,7 +686,13 @@ export class ProvStore {
     const edges = allRelations
       .filter((r) => {
         if (!overviewSet.has(r.subjectId) || !overviewSet.has(r.objectId)) return false;
-        if (r.relationType === "wasGeneratedBy" || r.relationType === "used") return true;
+        if (
+          r.relationType === "wasGeneratedBy" ||
+          r.relationType === "used" ||
+          r.relationType === "wasRevisionOf"
+        ) {
+          return true;
+        }
         if (r.relationType === "wasDerivedFrom") {
           return !skippedShortcutRoles.has(r.role ?? "");
         }
@@ -776,6 +784,13 @@ export class ProvStore {
             "prov:generatedEntity": rel.subjectId,
             "prov:usedEntity": rel.objectId,
             ...(rel.role ? { "prov:type": rel.role } : {}),
+          };
+          break;
+        case "wasRevisionOf":
+          grouped.wasDerivedFrom[key] = {
+            "prov:generatedEntity": rel.subjectId,
+            "prov:usedEntity": rel.objectId,
+            "prov:type": "prov:Revision",
           };
           break;
         case "wasGeneratedBy":

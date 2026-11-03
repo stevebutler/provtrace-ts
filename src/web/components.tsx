@@ -14,6 +14,8 @@ function edgeColor(relType: string): string {
   switch (relType) {
     case "wasDerivedFrom":
       return "#2563eb";
+    case "wasRevisionOf":
+      return "#0891b2";
     case "wasGeneratedBy":
       return "#16a34a";
     case "used":
@@ -347,6 +349,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
           prov:Agent (Pentagon)
         </span>
         <span style="color: #2563eb;">● wasDerivedFrom</span>
+        <span style="color: #0891b2;">● wasRevisionOf</span>
         <span style="color: #16a34a;">● wasGeneratedBy</span>
         <span style="color: #9333ea;">● used</span>
         <span style="color: #ea580c;">● attribution / agent</span>
@@ -368,22 +371,27 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
               aria-label="W3C PROV software provenance graph"
             >
               <defs>
-                {["wasDerivedFrom", "wasGeneratedBy", "used", "wasAttributedTo", "other"].map(
-                  (t) => (
-                    <marker
-                      key={t}
-                      id={`arrow-${t}`}
-                      viewBox="0 0 10 10"
-                      refX="9"
-                      refY="5"
-                      markerWidth="6"
-                      markerHeight="6"
-                      orient="auto-start-reverse"
-                    >
-                      <path d="M 0 1 L 10 5 L 0 9 z" fill={edgeColor(t)} />
-                    </marker>
-                  )
-                )}
+                {[
+                  "wasDerivedFrom",
+                  "wasRevisionOf",
+                  "wasGeneratedBy",
+                  "used",
+                  "wasAttributedTo",
+                  "other",
+                ].map((t) => (
+                  <marker
+                    key={t}
+                    id={`arrow-${t}`}
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="6"
+                    markerHeight="6"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 1 L 10 5 L 0 9 z" fill={edgeColor(t)} />
+                  </marker>
+                ))}
               </defs>
 
               {layout.columns.map((col) => (
@@ -405,6 +413,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
               {layout.edges.map((e, idx) => {
                 const markerKey = [
                   "wasDerivedFrom",
+                  "wasRevisionOf",
                   "wasGeneratedBy",
                   "used",
                   "wasAttributedTo",
@@ -420,7 +429,8 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                       fill="none"
                       stroke={edgeColor(e.relationType)}
                       stroke-width="1.65"
-                      stroke-opacity="0.72"
+                      stroke-dasharray={e.relationType === "wasRevisionOf" ? "4 3" : undefined}
+                      stroke-opacity="0.78"
                       marker-end={`url(#arrow-${markerKey})`}
                     />
                   </g>

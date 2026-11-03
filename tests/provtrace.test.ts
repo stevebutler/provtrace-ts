@@ -27,6 +27,35 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
     "Commits should be modeled strictly as prov:Activity, not prov:Entity"
   );
 
+  // Verify W3C PROV Revision links (wasRevisionOf) connect modified file versions to predecessors,
+  // while newly added files have no outgoing wasRevisionOf link.
+  const revisionRels = store
+    .getRelations()
+    .filter((r) => r.relationType === "wasRevisionOf");
+  assert.equal(
+    revisionRels.length,
+    3,
+    "Only the 3 modified file versions (requirements.adoc v2, ledger.py v2, test_ledger.py v2) should have wasRevisionOf"
+  );
+  assert.ok(
+    revisionRels.every((r) => r.subjectId.startsWith("entity:file:") && r.objectId.startsWith("entity:file:"))
+  );
+  const newOnlyFiles = store
+    .getEntities()
+    .filter(
+      (e) =>
+        e.id.startsWith("entity:file:src/pyledger/budget.py@") ||
+        e.id.startsWith("entity:file:src/pyledger/cli.py@")
+    );
+  assert.equal(newOnlyFiles.length, 2);
+  for (const nf of newOnlyFiles) {
+    assert.equal(
+      revisionRels.filter((r) => r.subjectId === nf.id).length,
+      0,
+      `Newly added file ${nf.id} must not have a wasRevisionOf predecessor`
+    );
+  }
+
   const matrix = store.getRequirementsMatrix();
   const byCode = new Map(matrix.map((r) => [r.code, r]));
 

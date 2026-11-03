@@ -91,6 +91,12 @@ Users MUST be able to group ledger entries by category (e.g., \`hosting\`, \`tra
 `
   );
 
+  writeRepoFile(
+    repoDir,
+    "docs/scratch-notes.txt",
+    "Initial brainstorming scratchpad (superseded once AsciiDoc spec is approved).\n"
+  );
+
   commitAs(
     repoDir,
     "Alice Hartmann",
@@ -99,7 +105,8 @@ Users MUST be able to group ledger entries by category (e.g., \`hosting\`, \`tra
     "Draft initial AsciiDoc requirements specification\n\nDefines REQ-001 and REQ-002.\nCloses #1"
   );
 
-  // Commit 2: Core ledger implementation + unit tests (Bob, Refs #2, REQ-001, REQ-002)
+  // Commit 2: Core ledger implementation + unit tests + remove obsolete scratchpad (Bob, Refs #2, REQ-001, REQ-002)
+  rmSync(path.join(repoDir, "docs/scratch-notes.txt"));
   writeRepoFile(
     repoDir,
     "src/pyledger/ledger.py",

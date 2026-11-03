@@ -127,7 +127,7 @@ export async function runGitHubExtractor(ctx: ExtractorContext) {
         activityType: "IssueResolution",
         label: `Resolve Issue #${issue.number}`,
         source: "github-issues",
-        startedAt: issue.created_at,
+        startedAt: issue.closed_at,
         endedAt: issue.closed_at,
         attributes: {
           issueNumber: issue.number,
@@ -139,7 +139,14 @@ export async function runGitHubExtractor(ctx: ExtractorContext) {
         objectId: entityId,
         attributes: {},
       });
-      relations++;
+      store.addRelation({
+        relationType: "wasInvalidatedBy",
+        subjectId: entityId,
+        objectId: closeActivityId,
+        role: "provtrace:issueClosed",
+        attributes: { time: issue.closed_at },
+      });
+      relations += 2;
 
       if (issue.closed_by) {
         store.addRelation({
@@ -205,9 +212,10 @@ export async function runGitHubExtractor(ctx: ExtractorContext) {
       attributes: {},
     });
     store.addRelation({
-      relationType: "wasGeneratedBy",
-      subjectId: prEntityId,
-      objectId: reviewActivityId,
+      relationType: "used",
+      subjectId: reviewActivityId,
+      objectId: prEntityId,
+      role: "reviewTarget",
       attributes: {},
     });
     store.addRelation({
@@ -218,6 +226,18 @@ export async function runGitHubExtractor(ctx: ExtractorContext) {
       attributes: {},
     });
     relations += 3;
+
+    if (pr.state === "merged" || pr.state === "closed") {
+      const closeTime = pr.merged_at ?? pr.created_at;
+      store.addRelation({
+        relationType: "wasInvalidatedBy",
+        subjectId: prEntityId,
+        objectId: reviewActivityId,
+        role: pr.state === "merged" ? "provtrace:prMerged" : "provtrace:prClosed",
+        attributes: { time: closeTime },
+      });
+      relations++;
+    }
 
     if (pr.reviewer) {
       store.addRelation({

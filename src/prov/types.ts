@@ -21,6 +21,7 @@ export type ProvRelationType =
   | "wasRevisionOf"
   | "hadMember"
   | "wasGeneratedBy"
+  | "wasInvalidatedBy"
   | "used"
   | "wasAttributedTo"
   | "wasAssociatedWith"

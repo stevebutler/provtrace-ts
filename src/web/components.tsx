@@ -20,6 +20,8 @@ function edgeColor(relType: string): string {
       return "#ca8a04";
     case "wasGeneratedBy":
       return "#16a34a";
+    case "wasInvalidatedBy":
+      return "#dc2626";
     case "used":
       return "#9333ea";
     case "wasAttributedTo":
@@ -360,6 +362,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
         <span style="color: #0891b2;">● wasRevisionOf</span>
         <span style="color: #ca8a04;">● hadMember</span>
         <span style="color: #16a34a;">● wasGeneratedBy</span>
+        <span style="color: #dc2626;">● wasInvalidatedBy</span>
         <span style="color: #9333ea;">● used</span>
         <span style="color: #ea580c;">● attribution / agent</span>
       </div>
@@ -385,6 +388,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                   "wasRevisionOf",
                   "hadMember",
                   "wasGeneratedBy",
+                  "wasInvalidatedBy",
                   "used",
                   "wasAttributedTo",
                   "other",
@@ -426,6 +430,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                   "wasRevisionOf",
                   "hadMember",
                   "wasGeneratedBy",
+                  "wasInvalidatedBy",
                   "used",
                   "wasAttributedTo",
                 ].includes(e.relationType)
@@ -440,7 +445,11 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                       fill="none"
                       stroke={edgeColor(e.relationType)}
                       stroke-width="1.65"
-                      stroke-dasharray={e.relationType === "wasRevisionOf" ? "4 3" : undefined}
+                      stroke-dasharray={
+                        e.relationType === "wasRevisionOf" || e.relationType === "wasInvalidatedBy"
+                          ? "4 3"
+                          : undefined
+                      }
                       stroke-opacity="0.78"
                       marker-end={`url(#arrow-${markerKey})`}
                     />
@@ -752,62 +761,77 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                 <th scope="col">Timestamp</th>
                 <th scope="col">Type</th>
                 <th scope="col">Agent (wasAssociatedWith)</th>
-                <th scope="col">Inputs (used) &amp; Outputs (wasGeneratedBy)</th>
+                <th scope="col">Inputs (used), Outputs (gen) &amp; Invalidations (inv)</th>
               </tr>
             </thead>
             <tbody>
-              {timeline.map(({ activity, associations, usedEntities, generatedEntities }) => (
-                <tr key={activity.id}>
-                  <th scope="row">
-                    <button
-                      type="button"
-                      class="entity-chip"
-                      {...dsClick(`@get('/api/focus?id=${encodeURIComponent(activity.id)}')`)}
-                    >
-                      {truncate(activity.label, 42)}
-                    </button>
-                  </th>
-                  <td style="white-space: nowrap; color: var(--text-muted);">
-                    {(activity.endedAt ?? activity.startedAt ?? "").replace("T", " ").slice(0, 16)}
-                  </td>
-                  <td>
-                    <span class="badge neutral">{activity.activityType}</span>
-                  </td>
-                  <td>
-                    {associations.length === 0 ? (
-                      "—"
-                    ) : (
+              {timeline.map(
+                ({
+                  activity,
+                  associations,
+                  usedEntities,
+                  generatedEntities,
+                  invalidatedEntities,
+                }) => (
+                  <tr key={activity.id}>
+                    <th scope="row">
+                      <button
+                        type="button"
+                        class="entity-chip"
+                        {...dsClick(`@get('/api/focus?id=${encodeURIComponent(activity.id)}')`)}
+                      >
+                        {truncate(activity.label, 42)}
+                      </button>
+                    </th>
+                    <td style="white-space: nowrap; color: var(--text-muted);">
+                      {(activity.endedAt ?? activity.startedAt ?? "").replace("T", " ").slice(0, 16)}
+                    </td>
+                    <td>
+                      <span class="badge neutral">{activity.activityType}</span>
+                    </td>
+                    <td>
+                      {associations.length === 0 ? (
+                        "—"
+                      ) : (
+                        <div class="chip-group">
+                          {associations.map((assoc) => (
+                            <button
+                              type="button"
+                              key={`${assoc.agent.id}-${assoc.role ?? ""}`}
+                              class="entity-chip"
+                              {...dsClick(
+                                `@get('/api/focus?id=${encodeURIComponent(assoc.agent.id)}')`
+                              )}
+                            >
+                              {truncate(assoc.agent.label, 22)}
+                              {assoc.role ? ` (${assoc.role})` : ""}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td>
                       <div class="chip-group">
-                        {associations.map((assoc) => (
-                          <button
-                            type="button"
-                            key={`${assoc.agent.id}-${assoc.role ?? ""}`}
-                            class="entity-chip"
-                            {...dsClick(`@get('/api/focus?id=${encodeURIComponent(assoc.agent.id)}')`)}
-                          >
-                            {truncate(assoc.agent.label, 22)}
-                            {assoc.role ? ` (${assoc.role})` : ""}
-                          </button>
+                        {usedEntities.slice(0, 3).map((u) => (
+                          <span class="entity-chip" key={`u-${u.id}`}>
+                            used: {truncate(u.label, 24)}
+                          </span>
+                        ))}
+                        {generatedEntities.slice(0, 3).map((g) => (
+                          <span class="entity-chip" key={`g-${g.id}`}>
+                            gen: {truncate(g.label, 24)}
+                          </span>
+                        ))}
+                        {invalidatedEntities.slice(0, 3).map((inv) => (
+                          <span class="entity-chip" key={`inv-${inv.id}`}>
+                            inv: {truncate(inv.label, 24)}
+                          </span>
                         ))}
                       </div>
-                    )}
-                  </td>
-                  <td>
-                    <div class="chip-group">
-                      {usedEntities.slice(0, 3).map((u) => (
-                        <span class="entity-chip" key={`u-${u.id}`}>
-                          used: {truncate(u.label, 24)}
-                        </span>
-                      ))}
-                      {generatedEntities.slice(0, 3).map((g) => (
-                        <span class="entity-chip" key={`g-${g.id}`}>
-                          gen: {truncate(g.label, 24)}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </div>

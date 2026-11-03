@@ -63,6 +63,24 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   assert.equal(docMemberRels.length, 4, "AsciiDoc spec collection should contain all 4 requirements");
   assert.equal(prMemberRels.length, 5, "PRs #10 (2 files), #11 (2 files), and #12 (1 file) should contain 5 member file revisions");
 
+  // Verify prov:wasInvalidatedBy on closed Issues (#1, #2, #3), merged PRs (#10, #11), and deleted Git file (docs/scratch-notes.txt)
+  const invalidationRels = store
+    .getRelations()
+    .filter((r) => r.relationType === "wasInvalidatedBy");
+  assert.equal(invalidationRels.length, 6);
+  const invalidatedSubjects = invalidationRels.map((r) => r.subjectId);
+  assert.ok(invalidatedSubjects.includes("entity:issue:1"));
+  assert.ok(invalidatedSubjects.includes("entity:issue:2"));
+  assert.ok(invalidatedSubjects.includes("entity:issue:3"));
+  assert.ok(!invalidatedSubjects.includes("entity:issue:4"), "Open issue #4 should not be invalidated");
+  assert.ok(invalidatedSubjects.includes("entity:pr:10"));
+  assert.ok(invalidatedSubjects.includes("entity:pr:11"));
+  assert.ok(!invalidatedSubjects.includes("entity:pr:12"), "Open PR #12 should not be invalidated");
+  assert.ok(
+    invalidatedSubjects.some((id) => id.startsWith("entity:file:docs/scratch-notes.txt@")),
+    "Deleted file docs/scratch-notes.txt should be invalidated by the commit that removed it"
+  );
+
   const matrix = store.getRequirementsMatrix();
   const byCode = new Map(matrix.map((r) => [r.code, r]));
 
@@ -160,4 +178,5 @@ test("Hono + JSX + Datastar routes render full page, focus fragments, and PROV-J
   assert.ok(provDoc.entity);
   assert.ok(provDoc.wasDerivedFrom);
   assert.ok(provDoc.hadMember);
+  assert.ok(provDoc.wasInvalidatedBy);
 });

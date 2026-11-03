@@ -426,12 +426,25 @@ export class ProvStore {
         ? Math.round((tracedCommitIds.size / commitActivities.length) * 100)
         : 0;
 
+    // Compute issue lead times purely from W3C PROV lifecycle (wasGeneratedBy -> wasInvalidatedBy)
     const issues = [...this.getEntities("Issue"), ...this.getEntities("Bug")];
+    const activitiesById = new Map(this.getActivities().map((a) => [a.id, a]));
     const leadHours: number[] = [];
     for (const issue of issues) {
-      const closedAt = issue.attributes.closed_at as string | null | undefined;
-      if (issue.createdAt && closedAt) {
-        const diffMs = new Date(closedAt).getTime() - new Date(issue.createdAt).getTime();
+      const genRel = relations.find(
+        (r) => r.relationType === "wasGeneratedBy" && r.subjectId === issue.id
+      );
+      const invRel = relations.find(
+        (r) => r.relationType === "wasInvalidatedBy" && r.subjectId === issue.id
+      );
+      const generatedAt =
+        (genRel ? activitiesById.get(genRel.objectId)?.startedAt : null) ?? issue.createdAt;
+      const invalidatedAt =
+        (typeof invRel?.attributes.time === "string" ? invRel.attributes.time : null) ??
+        (invRel ? activitiesById.get(invRel.objectId)?.endedAt : null);
+
+      if (generatedAt && invalidatedAt) {
+        const diffMs = new Date(invalidatedAt).getTime() - new Date(generatedAt).getTime();
         if (diffMs > 0) {
           leadHours.push(diffMs / (1000 * 60 * 60));
         }
@@ -629,12 +642,18 @@ export class ProvStore {
           .map((r) => entities.get(r.subjectId))
           .filter((e): e is ProvEntity => Boolean(e));
 
+        const invalidatedEntities = relations
+          .filter((r) => r.relationType === "wasInvalidatedBy" && r.objectId === act.id)
+          .map((r) => entities.get(r.subjectId))
+          .filter((e): e is ProvEntity => Boolean(e));
+
         return {
           activity: act,
           agent,
           associations,
           usedEntities,
           generatedEntities,
+          invalidatedEntities,
         };
       })
       .sort((a, b) => {
@@ -727,6 +746,7 @@ export class ProvStore {
         if (!overviewSet.has(r.subjectId) || !overviewSet.has(r.objectId)) return false;
         if (
           r.relationType === "wasGeneratedBy" ||
+          r.relationType === "wasInvalidatedBy" ||
           r.relationType === "used" ||
           r.relationType === "wasRevisionOf" ||
           r.relationType === "hadMember"
@@ -814,6 +834,7 @@ export class ProvStore {
       wasDerivedFrom: {},
       hadMember: {},
       wasGeneratedBy: {},
+      wasInvalidatedBy: {},
       used: {},
       wasAttributedTo: {},
       wasAssociatedWith: {},
@@ -849,6 +870,16 @@ export class ProvStore {
             "prov:entity": rel.subjectId,
             "prov:activity": rel.objectId,
             ...(rel.role ? { "prov:role": rel.role } : {}),
+          };
+          break;
+        case "wasInvalidatedBy":
+          grouped.wasInvalidatedBy[key] = {
+            "prov:entity": rel.subjectId,
+            "prov:activity": rel.objectId,
+            ...(rel.role ? { "prov:role": rel.role } : {}),
+            ...(typeof rel.attributes.time === "string"
+              ? { "prov:time": rel.attributes.time }
+              : {}),
           };
           break;
         case "used":

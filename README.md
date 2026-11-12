@@ -44,3 +44,7 @@ npm run dev
 npm run typecheck
 npm test
 ```
+
+## AI contributions
+
+This project was created in Google Antigravity using Gemini 4 Argon.

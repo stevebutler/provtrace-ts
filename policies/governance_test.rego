@@ -1,12 +1,52 @@
 package provtrace.governance_test
 
 import data.provtrace.governance
+import data.provtrace.prov
 import rego.v1
 
 test_rules_metadata_catalog if {
 	count(governance.rules) == 4
 	rule_ids := [r.id | some r in governance.rules]
 	rule_ids == ["GOV-001", "GOV-002", "GOV-003", "GOV-004"]
+}
+
+test_prov_vocabulary_predicates if {
+	mock_input := {
+		"entities": [{
+			"id": "entity:issue:1",
+			"entityType": "Issue",
+			"label": "Issue #1",
+			"source": "github-issues",
+			"attributes": {"number": 1, "state": "open"},
+		}],
+		"activities": [{
+			"id": "activity:commit:abc",
+			"activityType": "CommitActivity",
+			"label": "abc: Initial commit",
+			"attributes": {"files": ["src/pyledger/ledger.py"]},
+		}],
+		"agents": [
+			{"id": "agent:github:alice-pm", "agentType": "Person", "label": "Alice", "attributes": {}},
+			{"id": "agent:git:alice", "agentType": "Person", "label": "Alice Git", "attributes": {}},
+		],
+		"relations": [
+			{
+				"relationType": "used",
+				"subjectId": "activity:commit:abc",
+				"objectId": "entity:issue:1",
+			},
+			{
+				"relationType": "actedOnBehalfOf",
+				"subjectId": "agent:git:alice",
+				"objectId": "agent:github:alice-pm",
+			},
+		],
+		"requirementTraces": [],
+	}
+
+	prov.used("activity:commit:abc", "entity:issue:1") with input as mock_input
+	prov.canonical_agent_id("agent:git:alice") == "agent:github:alice-pm" with input as mock_input
+	count(prov.entities_by_type.Issue) == 1 with input as mock_input
 }
 
 test_gov_001_untracked_work if {

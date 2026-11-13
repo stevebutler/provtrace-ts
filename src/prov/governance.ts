@@ -45,23 +45,37 @@ export interface GovernanceRule extends GovernanceRuleMetadata {
   evaluate: (ctx: GovernanceContext) => GovernanceRuleFinding[];
 }
 
-const DEFAULT_REGO_PATH = path.resolve(process.cwd(), "policies/governance.rego");
+const DEFAULT_REGO_FILES = [
+  path.resolve(process.cwd(), "policies/prov.rego"),
+  path.resolve(process.cwd(), "policies/governance.rego"),
+];
+const DEFAULT_SCHEMA_PATH = path.resolve(process.cwd(), "policies/schema.json");
 const DEFAULT_WASM_PATH = path.resolve(process.cwd(), "policies/policy.wasm");
 
 let cachedPolicy: LoadedPolicy | null = null;
 let cachedWasmMtimeMs = 0;
 
 function ensureFreshWasmBundle(wasmPath: string): void {
-  if (wasmPath !== DEFAULT_WASM_PATH || !fs.existsSync(DEFAULT_REGO_PATH)) {
+  if (wasmPath !== DEFAULT_WASM_PATH || !DEFAULT_REGO_FILES.every((f) => fs.existsSync(f))) {
     return;
   }
-  const regoStat = fs.statSync(DEFAULT_REGO_PATH);
+  const latestRegoMtimeMs = Math.max(
+    ...DEFAULT_REGO_FILES.map((f) => fs.statSync(f).mtimeMs),
+    fs.existsSync(DEFAULT_SCHEMA_PATH) ? fs.statSync(DEFAULT_SCHEMA_PATH).mtimeMs : 0
+  );
   const wasmExists = fs.existsSync(wasmPath);
   const wasmStat = wasmExists ? fs.statSync(wasmPath) : null;
 
-  if (!wasmStat || regoStat.mtimeMs > wasmStat.mtimeMs) {
+  if (!wasmStat || latestRegoMtimeMs > wasmStat.mtimeMs) {
     const tmpBundle = path.join(os.tmpdir(), `provtrace-opa-${process.pid}.tar.gz`);
     try {
+      if (fs.existsSync(DEFAULT_SCHEMA_PATH)) {
+        execFileSync(
+          "opa",
+          ["check", "--strict", "--schema", DEFAULT_SCHEMA_PATH, ...DEFAULT_REGO_FILES],
+          { stdio: "pipe" }
+        );
+      }
       execFileSync(
         "opa",
         [
@@ -76,7 +90,7 @@ function ensureFreshWasmBundle(wasmPath: string): void {
           "provtrace/governance/findings",
           "-o",
           tmpBundle,
-          DEFAULT_REGO_PATH,
+          ...DEFAULT_REGO_FILES,
         ],
         { stdio: "pipe" }
       );

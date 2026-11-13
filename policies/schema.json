@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ProvTrace GovernanceContext Input Schema",
+  "description": "Canonical contract for the W3C PROV software development provenance graph passed as `input` to OPA Rego policies.",
+  "type": "object",
+  "required": ["entities", "activities", "agents", "relations", "requirementTraces"],
+  "additionalProperties": false,
+  "definitions": {
+    "ProvEntity": {
+      "type": "object",
+      "required": ["id", "entityType", "label", "source", "attributes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "entityType": {
+          "type": "string",
+          "enum": [
+            "Requirement",
+            "DocumentRevision",
+            "Issue",
+            "Bug",
+            "PullRequest",
+            "CodeArtifact",
+            "TestArtifact"
+          ]
+        },
+        "label": { "type": "string" },
+        "source": {
+          "type": "string",
+          "enum": ["github-issues", "git-repo", "asciidoc", "prov-linker"]
+        },
+        "createdAt": { "type": ["string", "null"] },
+        "attributes": {
+          "type": "object",
+          "properties": {
+            "code": { "type": "string" },
+            "title": { "type": "string" },
+            "status": { "type": "string" },
+            "priority": { "type": "string" },
+            "sourceRefs": { "type": "array", "items": { "type": "string" } },
+            "file": { "type": "string" },
+            "path": { "type": "string" },
+            "commit": { "type": "string" },
+            "number": { "type": "number" },
+            "state": { "type": "string" },
+            "body": { "type": "string" },
+            "labels": { "type": "array", "items": { "type": "string" } },
+            "closes_issues": { "type": "array", "items": { "type": "number" } },
+            "commit_subject_match": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "ProvActivity": {
+      "type": "object",
+      "required": ["id", "activityType", "label", "attributes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "activityType": {
+          "type": "string",
+          "enum": [
+            "SpecAuthoring",
+            "IssueReport",
+            "IssueResolution",
+            "CommitActivity",
+            "PullRequestReview"
+          ]
+        },
+        "label": { "type": "string" },
+        "startedAt": { "type": ["string", "null"] },
+        "endedAt": { "type": ["string", "null"] },
+        "attributes": {
+          "type": "object",
+          "properties": {
+            "sha": { "type": "string" },
+            "shortSha": { "type": "string" },
+            "subject": { "type": "string" },
+            "fullMessage": { "type": "string" },
+            "files": { "type": "array", "items": { "type": "string" } },
+            "deletedFiles": { "type": "array", "items": { "type": "string" } },
+            "issueNumber": { "type": "number" },
+            "prNumber": { "type": "number" },
+            "state": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "ProvAgent": {
+      "type": "object",
+      "required": ["id", "agentType", "label", "attributes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "agentType": {
+          "type": "string",
+          "enum": ["Person", "SoftwareAgent"]
+        },
+        "label": { "type": "string" },
+        "attributes": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "email": { "type": "string" },
+            "login": { "type": "string" },
+            "role": { "type": "string" }
+          },
+          "additionalProperties": true
+        }
+      }
+    },
+    "ProvRelation": {
+      "type": "object",
+      "required": ["relationType", "subjectId", "objectId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "number" },
+        "relationType": {
+          "type": "string",
+          "enum": [
+            "wasDerivedFrom",
+            "wasRevisionOf",
+            "hadMember",
+            "wasGeneratedBy",
+            "wasInvalidatedBy",
+            "used",
+            "wasAttributedTo",
+            "wasAssociatedWith",
+            "wasInformedBy",
+            "actedOnBehalfOf"
+          ]
+        },
+        "subjectId": { "type": "string" },
+        "objectId": { "type": "string" },
+        "role": { "type": ["string", "null"] },
+        "attributes": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "RequirementTrace": {
+      "type": "object",
+      "required": [
+        "reqId",
+        "code",
+        "title",
+        "specStatus",
+        "issues",
+        "codeFiles",
+        "testFiles"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "reqId": { "type": "string" },
+        "code": { "type": "string" },
+        "title": { "type": "string" },
+        "specStatus": { "type": "string" },
+        "issues": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProvEntity" }
+        },
+        "pullRequests": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProvEntity" }
+        },
+        "commitActivities": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProvActivity" }
+        },
+        "codeFiles": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProvEntity" }
+        },
+        "testFiles": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ProvEntity" }
+        }
+      }
+    }
+  },
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ProvEntity" }
+    },
+    "activities": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ProvActivity" }
+    },
+    "agents": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ProvAgent" }
+    },
+    "relations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/ProvRelation" }
+    },
+    "requirementTraces": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/RequirementTrace" }
+    }
+  }
+}

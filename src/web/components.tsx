@@ -1,7 +1,16 @@
 import type { FC } from "hono/jsx";
 import type { ProvStore } from "../db/store.js";
+import type { GraphFocusMode } from "../prov/types.js";
 import { computeProvGraphLayout } from "./graph-layout.js";
 import { APP_CSS } from "./styles.js";
+
+function focusUrl(id?: string, mode: GraphFocusMode = "1hop"): string {
+  const params = new URLSearchParams();
+  if (id) params.set("id", id);
+  if (mode !== "1hop") params.set("mode", mode);
+  const qs = params.toString();
+  return qs ? `/api/focus?${qs}` : "/api/focus";
+}
 
 const dsClick = (expr: string) => ({ "data-on:click": expr } as Record<string, string>);
 const dsInit = (expr: string) => ({ "data-init": expr } as Record<string, string>);
@@ -176,10 +185,11 @@ export const LoadersSection: FC<{ store: ProvStore; isRunning: boolean }> = ({
   );
 };
 
-export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
-  store,
-  selectedId,
-}) => {
+export const NodeInspector: FC<{
+  store: ProvStore;
+  selectedId?: string;
+  focusMode?: GraphFocusMode;
+}> = ({ store, selectedId, focusMode = "1hop" }) => {
   const info = selectedId ? store.inspectNode(selectedId) : null;
 
   if (!info) {
@@ -203,7 +213,7 @@ export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
           type="button"
           class="small"
           style="margin-inline-start: auto;"
-          {...dsClick("@get('/api/focus')")}
+          {...dsClick(`@get('${focusUrl(undefined, focusMode)}')`)}
         >
           Clear Focus
         </button>
@@ -234,7 +244,7 @@ export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
               <button
                 type="button"
                 class="entity-chip"
-                {...dsClick(`@get('/api/focus?id=${encodeURIComponent(r.objectId)}')`)}
+                {...dsClick(`@get('${focusUrl(r.objectId, focusMode)}')`)}
               >
                 {truncate(r.targetLabel, 38)}
               </button>
@@ -257,7 +267,7 @@ export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
               <button
                 type="button"
                 class="entity-chip"
-                {...dsClick(`@get('/api/focus?id=${encodeURIComponent(r.subjectId)}')`)}
+                {...dsClick(`@get('${focusUrl(r.subjectId, focusMode)}')`)}
               >
                 {truncate(r.sourceLabel, 38)}
               </button>
@@ -285,11 +295,12 @@ export const NodeInspector: FC<{ store: ProvStore; selectedId?: string }> = ({
   );
 };
 
-export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
-  store,
-  focusId,
-}) => {
-  const { nodes, edges } = store.getGraphData(focusId);
+export const ExplorerSection: FC<{
+  store: ProvStore;
+  focusId?: string;
+  focusMode?: GraphFocusMode;
+}> = ({ store, focusId, focusMode = "1hop" }) => {
+  const { nodes, edges } = store.getGraphData(focusId, focusMode);
   const layout = computeProvGraphLayout(nodes, edges);
 
   const quickFilters: Array<{ id?: string; label: string }> = [
@@ -308,11 +319,37 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
           <h2>Interactive W3C PROV Lineage Graph</h2>
           <p>
             {focusId
-              ? `Showing 2-hop PROV neighborhood (Entities, Activities & Agents) around ${focusId}`
-              : "Overview of causal lineage across Issues, AsciiDoc Specs, Commit Activities (prov:Activity), Files & PRs"}
+              ? focusMode === "lineage"
+                ? `Showing upstream & downstream causal lineage for ${focusId} (${nodes.length} nodes, ${edges.length} edges)`
+                : `Showing 1-hop PROV neighborhood around ${focusId} (${nodes.length} nodes, ${edges.length} edges)`
+              : `Overview of causal lineage across Issues, AsciiDoc Specs, Commit Activities, Files & PRs (${nodes.length} nodes, ${edges.length} edges)`}
           </p>
         </div>
-        <div class="panel-actions">
+        <div class="panel-actions" style="display: flex; align-items: safe center; gap: 0.5rem; flex-wrap: wrap;">
+          <div
+            role="group"
+            aria-label="Focus neighborhood depth"
+            style="display: inline-flex; align-items: safe center; gap: 0.25rem; padding: 0.2rem; background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 999px;"
+          >
+            <button
+              type="button"
+              class={`pill ${focusMode === "1hop" ? "active" : ""}`}
+              style="padding: 0.22rem 0.65rem; font-size: 0.76rem;"
+              title="Show only direct (1-hop) neighbors of the selected node"
+              {...dsClick(`@get('${focusUrl(focusId, "1hop")}')`)}
+            >
+              1-Hop
+            </button>
+            <button
+              type="button"
+              class={`pill ${focusMode === "lineage" ? "active" : ""}`}
+              style="padding: 0.22rem 0.65rem; font-size: 0.76rem;"
+              title="Show directional upstream & downstream derivation chain without sibling fan-out"
+              {...dsClick(`@get('${focusUrl(focusId, "lineage")}')`)}
+            >
+              Full Lineage
+            </button>
+          </div>
           <a href="/api/prov.json" target="_blank" rel="noreferrer" class="btn small">
             Export W3C PROV-JSON ↗
           </a>
@@ -322,7 +359,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
       <div class="filter-pills">
         {quickFilters.map((f) => {
           const isActive = (f.id ?? "") === (focusId ?? "");
-          const url = f.id ? `/api/focus?id=${encodeURIComponent(f.id)}` : "/api/focus";
+          const url = focusUrl(f.id, focusMode);
           return (
             <button
               type="button"
@@ -470,7 +507,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
                   <g
                     key={node.id}
                     class="prov-node"
-                    {...dsClick(`@get('/api/focus?id=${encodeURIComponent(node.id)}')`)}
+                    {...dsClick(`@get('${focusUrl(node.id, focusMode)}')`)}
                   >
                     {node.kind === "agent" ? (
                       <polygon
@@ -530,7 +567,7 @@ export const ExplorerSection: FC<{ store: ProvStore; focusId?: string }> = ({
           )}
         </div>
 
-        <NodeInspector store={store} selectedId={focusId} />
+        <NodeInspector store={store} selectedId={focusId} focusMode={focusMode} />
       </div>
     </section>
   );
@@ -844,7 +881,8 @@ export const AppPage: FC<{
   store: ProvStore;
   isRunning: boolean;
   focusId?: string;
-}> = ({ store, isRunning, focusId }) => {
+  focusMode?: GraphFocusMode;
+}> = ({ store, isRunning, focusId, focusMode = "1hop" }) => {
   return (
     <html lang="en">
       <head>
@@ -872,7 +910,7 @@ export const AppPage: FC<{
 
           <KpiSection store={store} />
           <LoadersSection store={store} isRunning={isRunning} />
-          <ExplorerSection store={store} focusId={focusId} />
+          <ExplorerSection store={store} focusId={focusId} focusMode={focusMode} />
           <ReportsSection store={store} />
         </main>
       </body>

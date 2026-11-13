@@ -186,7 +186,22 @@ test("Hono + JSX + Datastar routes render full page, focus fragments, and PROV-J
   assert.equal(focusRes.status, 200);
   const focusHtml = await focusRes.text();
   assert.match(focusHtml, /id="explorer-section"/);
+  assert.match(focusHtml, /Showing 1-hop PROV neighborhood around entity:req:REQ-001/);
   assert.match(focusHtml, /Outgoing PROV Relations/);
+
+  const lineageRes = await app.request("/api/focus?id=entity%3Areq%3AREQ-001&mode=lineage");
+  assert.equal(lineageRes.status, 200);
+  const lineageHtml = await lineageRes.text();
+  assert.match(lineageHtml, /Showing upstream &amp; downstream causal lineage for entity:req:REQ-001/);
+
+  const hop1Graph = store.getGraphData("entity:req:REQ-001", "1hop");
+  const lineageGraph = store.getGraphData("entity:req:REQ-001", "lineage");
+  assert.equal(hop1Graph.nodes.length, 8, "1-hop focus around REQ-001 should have 8 direct neighbor nodes");
+  assert.ok(lineageGraph.nodes.length > hop1Graph.nodes.length, "Full lineage should include downstream files and PRs");
+  assert.ok(
+    !lineageGraph.nodes.some((n) => n.id === "entity:req:REQ-003" || n.id === "entity:req:REQ-004"),
+    "Full lineage for REQ-001 must not fan out to unrelated sibling requirements"
+  );
 
   const provRes = await app.request("/api/prov.json");
   assert.equal(provRes.status, 200);

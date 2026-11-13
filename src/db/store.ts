@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { evaluateGovernanceRules, type GovernanceRule } from "../prov/governance.js";
 import type {
+  GraphFocusMode,
   LoaderLogEntry,
   LoaderName,
   LoaderState,
@@ -663,7 +664,10 @@ export class ProvStore {
       });
   }
 
-  getGraphData(focusId?: string): { nodes: ProvGraphNode[]; edges: ProvGraphEdge[] } {
+  getGraphData(
+    focusId?: string,
+    mode: GraphFocusMode = "1hop"
+  ): { nodes: ProvGraphNode[]; edges: ProvGraphEdge[] } {
     const allNodes = new Map<string, ProvGraphNode>();
 
     for (const e of this.getEntities()) {
@@ -695,32 +699,153 @@ export class ProvStore {
     }
 
     const allRelations = this.getRelations();
+    const skippedShortcutRoles = new Set([
+      "provtrace:satisfiesRequirement",
+      "provtrace:implementsIssue",
+      "provtrace:documentsIssue",
+    ]);
+    const cleanRelations = allRelations.filter((r) => {
+      if (r.relationType !== "wasDerivedFrom") return true;
+      if (skippedShortcutRoles.has(r.role ?? "")) return false;
+      // Only include the 4-column PR -> Issue shortcut when directly focusing that PR or Issue
+      if (r.role === "provtrace:resolvesIssue") {
+        return r.subjectId === focusId || r.objectId === focusId;
+      }
+      return true;
+    });
+    const causalRelationTypes = new Set<ProvRelationType>([
+      "wasDerivedFrom",
+      "wasRevisionOf",
+      "wasGeneratedBy",
+      "wasInvalidatedBy",
+      "used",
+      "hadMember",
+    ]);
 
     if (focusId && allNodes.has(focusId)) {
-      const keep = new Set<string>([focusId]);
-      let frontier = new Set<string>([focusId]);
-      for (let hop = 0; hop < 2; hop++) {
-        const next = new Set<string>();
-        for (const rel of allRelations) {
-          if (frontier.has(rel.subjectId) && allNodes.has(rel.objectId)) {
-            if (!keep.has(rel.objectId)) {
-              keep.add(rel.objectId);
-              next.add(rel.objectId);
-            }
+      if (mode === "1hop") {
+        const keep = new Set<string>([focusId]);
+        for (const rel of cleanRelations) {
+          if (rel.subjectId === focusId && allNodes.has(rel.objectId)) {
+            keep.add(rel.objectId);
           }
-          if (frontier.has(rel.objectId) && allNodes.has(rel.subjectId)) {
-            if (!keep.has(rel.subjectId)) {
-              keep.add(rel.subjectId);
-              next.add(rel.subjectId);
-            }
+          if (rel.objectId === focusId && allNodes.has(rel.subjectId)) {
+            keep.add(rel.subjectId);
           }
         }
-        frontier = next;
+
+        const nodes = [...keep].map((id) => allNodes.get(id)!).filter(Boolean);
+        const edges = cleanRelations
+          .filter((r) => r.subjectId === focusId || r.objectId === focusId)
+          .map((r) => ({
+            relationType: r.relationType,
+            from: r.subjectId,
+            to: r.objectId,
+            role: r.role,
+          }));
+        return { nodes, edges };
+      }
+
+      // Full Lineage mode: directional upstream + downstream derivation without sibling fan-out
+      const derivedUp = new Map<string, Set<string>>();
+      const derivedDown = new Map<string, Set<string>>();
+      for (const r of allRelations) {
+        if (r.relationType === "wasDerivedFrom" || r.relationType === "wasRevisionOf") {
+          if (!derivedDown.has(r.objectId)) derivedDown.set(r.objectId, new Set());
+          derivedDown.get(r.objectId)!.add(r.subjectId);
+          if (!derivedUp.has(r.subjectId)) derivedUp.set(r.subjectId, new Set());
+          derivedUp.get(r.subjectId)!.add(r.objectId);
+        }
+      }
+
+      const seeds = new Set<string>([focusId]);
+      const directNeighbors = new Set<string>([focusId]);
+
+      for (const r of cleanRelations) {
+        if (r.subjectId === focusId && allNodes.has(r.objectId)) {
+          directNeighbors.add(r.objectId);
+        }
+        if (r.objectId === focusId && allNodes.has(r.subjectId)) {
+          directNeighbors.add(r.subjectId);
+        }
+        if (r.relationType === "hadMember" && r.subjectId === focusId) {
+          seeds.add(r.objectId);
+        }
+        if (
+          focusId.startsWith("activity:") &&
+          (r.subjectId === focusId || r.objectId === focusId) &&
+          causalRelationTypes.has(r.relationType)
+        ) {
+          const otherId = r.subjectId === focusId ? r.objectId : r.subjectId;
+          if (otherId.startsWith("entity:") && !otherId.startsWith("entity:file:docs/")) {
+            seeds.add(otherId);
+          }
+        }
+      }
+
+      const coreEntities = new Set<string>(seeds);
+
+      // 1. Walk strictly upstream from seeds
+      let queue = [...seeds];
+      const seenUp = new Set<string>(queue);
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const up of derivedUp.get(cur) ?? []) {
+          if (!seenUp.has(up) && allNodes.has(up)) {
+            seenUp.add(up);
+            coreEntities.add(up);
+            queue.push(up);
+          }
+        }
+      }
+
+      // 2. Walk strictly downstream from seeds (never feeding upstream ancestors back down)
+      queue = [...seeds];
+      const seenDown = new Set<string>(queue);
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        for (const down of derivedDown.get(cur) ?? []) {
+          if (!seenDown.has(down) && allNodes.has(down)) {
+            seenDown.add(down);
+            coreEntities.add(down);
+            queue.push(down);
+          }
+        }
+      }
+
+      const keep = new Set<string>([...coreEntities, ...directNeighbors]);
+      for (const r of cleanRelations) {
+        if (
+          r.relationType === "hadMember" &&
+          r.subjectId.startsWith("entity:file:docs/") &&
+          coreEntities.has(r.objectId)
+        ) {
+          keep.add(r.subjectId);
+        }
+        if (
+          r.relationType === "hadMember" &&
+          r.subjectId.startsWith("entity:pr:") &&
+          coreEntities.has(r.objectId)
+        ) {
+          keep.add(r.subjectId);
+        }
+        if (
+          r.relationType === "wasGeneratedBy" &&
+          coreEntities.has(r.subjectId) &&
+          r.objectId.startsWith("activity:commit:") &&
+          !r.subjectId.startsWith("entity:file:docs/")
+        ) {
+          keep.add(r.objectId);
+        }
       }
 
       const nodes = [...keep].map((id) => allNodes.get(id)!).filter(Boolean);
-      const edges = allRelations
-        .filter((r) => keep.has(r.subjectId) && keep.has(r.objectId))
+      const edges = cleanRelations
+        .filter((r) => {
+          if (!keep.has(r.subjectId) || !keep.has(r.objectId)) return false;
+          if (r.subjectId === focusId || r.objectId === focusId) return true;
+          return causalRelationTypes.has(r.relationType);
+        })
         .map((r) => ({
           relationType: r.relationType,
           from: r.subjectId,
@@ -735,28 +860,11 @@ export class ProvStore {
       (n) => n.kind === "entity" || (n.kind === "activity" && n.subType === "CommitActivity")
     );
     const overviewSet = new Set(overviewNodes.map((n) => n.id));
-    const skippedShortcutRoles = new Set([
-      "provtrace:satisfiesRequirement",
-      "provtrace:implementsIssue",
-      "provtrace:documentsIssue",
-    ]);
 
-    const edges = allRelations
+    const edges = cleanRelations
       .filter((r) => {
         if (!overviewSet.has(r.subjectId) || !overviewSet.has(r.objectId)) return false;
-        if (
-          r.relationType === "wasGeneratedBy" ||
-          r.relationType === "wasInvalidatedBy" ||
-          r.relationType === "used" ||
-          r.relationType === "wasRevisionOf" ||
-          r.relationType === "hadMember"
-        ) {
-          return true;
-        }
-        if (r.relationType === "wasDerivedFrom") {
-          return !skippedShortcutRoles.has(r.role ?? "");
-        }
-        return false;
+        return causalRelationTypes.has(r.relationType);
       })
       .map((r) => ({
         relationType: r.relationType,

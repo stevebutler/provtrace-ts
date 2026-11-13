@@ -148,13 +148,15 @@ export function computeProvGraphLayout(
     const dx = Math.abs(x2 - x1) * 0.45;
     const c1x = src.x > dst.x ? x1 - dx : x1 + dx;
     const c2x = src.x > dst.x ? x2 + dx : x2 - dx;
-    const pathD = `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`;
+    const colSpan = Math.abs(src.column - dst.column);
+    const arcY = colSpan > 1 ? -26 - (colSpan - 2) * 8 : 0;
+    const pathD = `M ${x1} ${y1} C ${c1x} ${y1 + arcY}, ${c2x} ${y2 + arcY}, ${x2} ${y2}`;
 
     positionedEdges.push({
       ...edge,
       pathD,
       labelX: (x1 + x2) / 2,
-      labelY: (y1 + y2) / 2 - 4,
+      labelY: (y1 + y2) / 2 + arcY * 0.65 - 4,
     });
   }
 

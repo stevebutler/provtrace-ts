@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { ProvStore } from "./db/store.js";
 import { ExtractionPipeline } from "./extractors/pipeline.js";
-import type { LoaderName } from "./prov/types.js";
+import type { GraphFocusMode, LoaderName } from "./prov/types.js";
 import {
   AppPage,
   ExplorerSection,
@@ -29,8 +29,9 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
 
   app.get("/", (c) => {
     const focusId = c.req.query("focus") || undefined;
+    const focusMode: GraphFocusMode = c.req.query("mode") === "lineage" ? "lineage" : "1hop";
     return c.html(
-      `<!DOCTYPE html>${(<AppPage store={store} isRunning={pipeline.isRunning} focusId={focusId} />).toString()}`
+      `<!DOCTYPE html>${(<AppPage store={store} isRunning={pipeline.isRunning} focusId={focusId} focusMode={focusMode} />).toString()}`
     );
   });
 
@@ -79,7 +80,8 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
   // Interactive graph focus & node inspector patch
   app.get("/api/focus", (c) => {
     const id = c.req.query("id") || undefined;
-    const html = (<ExplorerSection store={store} focusId={id} />).toString();
+    const mode: GraphFocusMode = c.req.query("mode") === "lineage" ? "lineage" : "1hop";
+    const html = (<ExplorerSection store={store} focusId={id} focusMode={mode} />).toString();
     return c.body(html, 200, { "Content-Type": "text/html; charset=utf-8" });
   });
 

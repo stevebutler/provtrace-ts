@@ -131,6 +131,8 @@ export interface SummaryStats {
   avgIssueLeadTimeHours: number | null;
 }
 
+export type GraphFocusMode = "1hop" | "lineage";
+
 export interface ProvGraphNode {
   id: string;
   kind: "entity" | "activity" | "agent";

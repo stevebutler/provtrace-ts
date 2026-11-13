@@ -25,7 +25,7 @@ The live web application at `http://localhost:3000` is designed **both for open-
 - **W3C PROV-JSON Export**: One-click export of the complete provenance graph at `/api/prov.json`.
 
 ### Governance & Compliance Checking
-- **Rule-Driven Findings Panel**: Automatically evaluates the extensible rule registry (`src/prov/governance.ts`) to surface process anomalies—such as untracked production commits (`GOV-001`), unimplemented spec requirements (`GOV-002`), missing test coverage (`GOV-003`), and self-reviewed merged PRs violating four-eyes segregation of duties (`GOV-004`)—each with a one-click **Inspect Graph** jump.
+- **OPA Rego Policy Engine**: Governance rules and their human-editable metadata (`id`, `category`, `severity`, `description`) live in [`policies/governance.rego`](policies/governance.rego) and execute synchronously in-process via WebAssembly (`@open-policy-agent/opa-wasm`), surfacing process anomalies—such as untracked production commits (`GOV-001`), unimplemented spec requirements (`GOV-002`), missing test coverage (`GOV-003`), and self-reviewed merged PRs violating four-eyes segregation of duties (`GOV-004`)—each with a one-click **Inspect Graph** jump.
 - **End-to-End Requirements Traceability Matrix**: Computes transitive `prov:wasDerivedFrom` / `prov:wasRevisionOf` coverage from AsciiDoc `REQ-*` sections across GitHub Issues, PRs, commit activities, Python code, and unit tests, with compliance badges driven directly by governance rule results.
 
 ## Quick Start
@@ -39,6 +39,10 @@ npm run extract
 
 # Start the live Hono + Datastar web app on http://localhost:3000
 npm run dev
+
+# Test & build OPA Rego governance policies (policies/governance.rego -> policies/policy.wasm)
+npm run policy:test
+npm run policy:build
 
 # Run TypeScript typecheck & test suite
 npm run typecheck

@@ -101,8 +101,24 @@ test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph"
   const anomalies = store.getProcessAnomalies();
   assert.equal(GOVERNANCE_RULES.length, 4);
   assert.deepEqual(
+    GOVERNANCE_RULES.map((r) => ({ id: r.id, category: r.category, severity: r.severity })),
+    [
+      { id: "GOV-001", category: "Untracked Work", severity: "high" },
+      { id: "GOV-002", category: "Unimplemented Spec", severity: "medium" },
+      { id: "GOV-003", category: "Missing Test Coverage", severity: "medium" },
+      { id: "GOV-004", category: "Four-Eyes Review", severity: "high" },
+    ],
+    "Rule metadata should be loaded from OPA Rego catalog"
+  );
+  assert.deepEqual(
     anomalies.map((a) => a.ruleId),
     ["GOV-001", "GOV-002", "GOV-003", "GOV-004"]
+  );
+  const subsetAnomalies = store.getProcessAnomalies([GOVERNANCE_RULES[0], GOVERNANCE_RULES[3]]);
+  assert.deepEqual(
+    subsetAnomalies.map((a) => a.ruleId),
+    ["GOV-001", "GOV-004"],
+    "Individual OPA-backed GovernanceRule.evaluate() calls should filter by rule ID"
   );
   const categories = anomalies.map((a) => a.category);
   assert.ok(categories.includes("Untracked Work"), "Should detect untracked CLI commit");

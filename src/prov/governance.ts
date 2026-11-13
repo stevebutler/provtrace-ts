@@ -1,4 +1,15 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import type { LoadedPolicy, loadPolicySync as LoadPolicySyncFn } from "@open-policy-agent/opa-wasm";
 import type { ProvStore } from "../db/store.js";
+
+const require = createRequire(import.meta.url);
+const { loadPolicySync } = require("@open-policy-agent/opa-wasm") as {
+  loadPolicySync: typeof LoadPolicySyncFn;
+};
 import type {
   AnomalySeverity,
   ProcessAnomaly,
@@ -23,187 +34,112 @@ export interface GovernanceRuleFinding {
   detail: string;
 }
 
-export interface GovernanceRule {
+export interface GovernanceRuleMetadata {
   id: string;
   category: string;
   severity: AnomalySeverity;
   description: string;
+}
+
+export interface GovernanceRule extends GovernanceRuleMetadata {
   evaluate: (ctx: GovernanceContext) => GovernanceRuleFinding[];
 }
 
-export const untrackedWorkRule: GovernanceRule = {
-  id: "GOV-001",
-  category: "Untracked Work",
-  severity: "high",
-  description:
-    "Every CommitActivity modifying production source files (src/*) must reference an upstream GitHub Issue or AsciiDoc Requirement via prov:used.",
-  evaluate({ activities, relations }) {
-    const findings: GovernanceRuleFinding[] = [];
-    const commitActivities = activities.filter((a) => a.activityType === "CommitActivity");
+const DEFAULT_REGO_PATH = path.resolve(process.cwd(), "policies/governance.rego");
+const DEFAULT_WASM_PATH = path.resolve(process.cwd(), "policies/policy.wasm");
 
-    for (const commitAct of commitActivities) {
-      const files = (commitAct.attributes.files as string[] | undefined) ?? [];
-      const touchesSrc = files.some((f) => f.startsWith("src/") && !f.endsWith("__init__.py"));
-      if (!touchesSrc) continue;
+let cachedPolicy: LoadedPolicy | null = null;
+let cachedWasmMtimeMs = 0;
 
-      const hasGovernanceInput = relations.some(
-        (r) =>
-          r.relationType === "used" &&
-          r.subjectId === commitAct.id &&
-          (r.objectId.startsWith("entity:issue:") || r.objectId.startsWith("entity:req:"))
+function ensureFreshWasmBundle(wasmPath: string): void {
+  if (wasmPath !== DEFAULT_WASM_PATH || !fs.existsSync(DEFAULT_REGO_PATH)) {
+    return;
+  }
+  const regoStat = fs.statSync(DEFAULT_REGO_PATH);
+  const wasmExists = fs.existsSync(wasmPath);
+  const wasmStat = wasmExists ? fs.statSync(wasmPath) : null;
+
+  if (!wasmStat || regoStat.mtimeMs > wasmStat.mtimeMs) {
+    const tmpBundle = path.join(os.tmpdir(), `provtrace-opa-${process.pid}.tar.gz`);
+    try {
+      execFileSync(
+        "opa",
+        [
+          "build",
+          "-t",
+          "wasm",
+          "-e",
+          "provtrace/governance/anomalies",
+          "-e",
+          "provtrace/governance/rules",
+          "-e",
+          "provtrace/governance/findings",
+          "-o",
+          tmpBundle,
+          DEFAULT_REGO_PATH,
+        ],
+        { stdio: "pipe" }
       );
-
-      if (!hasGovernanceInput) {
-        findings.push({
-          nodeId: commitAct.id,
-          label: commitAct.label,
-          detail: `Commit activity modifies production source (${files.join(", ")}) with no prov:used link to any GitHub Issue or AsciiDoc Requirement.`,
-        });
-      }
-    }
-
-    return findings;
-  },
-};
-
-export const unimplementedSpecRule: GovernanceRule = {
-  id: "GOV-002",
-  category: "Unimplemented Spec",
-  severity: "medium",
-  description:
-    "Every Requirement entity extracted from specifications should have at least one downstream CodeArtifact via prov:wasDerivedFrom.",
-  evaluate({ requirementTraces }) {
-    return requirementTraces
-      .filter((trace) => trace.codeFiles.length === 0)
-      .map((trace) => ({
-        nodeId: trace.reqId,
-        label: `${trace.code}: ${trace.title}`,
-        detail: `Defined in AsciiDoc (${trace.specStatus}) with ${trace.issues.length} linked issue(s), but zero derived CodeArtifact entities exist.`,
-      }));
-  },
-};
-
-export const missingTestCoverageRule: GovernanceRule = {
-  id: "GOV-003",
-  category: "Missing Test Coverage",
-  severity: "medium",
-  description:
-    "Every implemented Requirement with derived CodeArtifact entities must also have at least one derived TestArtifact.",
-  evaluate({ requirementTraces }) {
-    return requirementTraces
-      .filter((trace) => trace.codeFiles.length > 0 && trace.testFiles.length === 0)
-      .map((trace) => {
-        const fileNames = trace.codeFiles
-          .map((f) => String(f.attributes.path ?? f.label))
-          .join(", ");
-        return {
-          nodeId: trace.reqId,
-          label: `${trace.code}: ${trace.title}`,
-          detail: `Implemented in ${fileNames}, but no TestArtifact derives from this requirement or its commit activities.`,
-        };
+      execFileSync("tar", ["-m", "-xzf", tmpBundle, "-C", path.dirname(wasmPath), "/policy.wasm"], {
+        stdio: "pipe",
       });
-  },
-};
-
-export const fourEyesReviewRule: GovernanceRule = {
-  id: "GOV-004",
-  category: "Four-Eyes Review",
-  severity: "high",
-  description:
-    "Every merged PullRequest must have a PullRequestReview activity associated with an independent reviewer agent (role='reviewer') distinct from the PR and commit authors.",
-  evaluate({ entities, agents, relations }) {
-    const findings: GovernanceRuleFinding[] = [];
-    const agentById = new Map(agents.map((a) => [a.id, a]));
-
-    // Map delegate Git agents -> canonical GitHub person agents via prov:actedOnBehalfOf
-    const canonicalAgentId = (agentId: string): string => {
-      const delegateRel = relations.find(
-        (r) => r.relationType === "actedOnBehalfOf" && r.subjectId === agentId
-      );
-      return delegateRel ? delegateRel.objectId : agentId;
-    };
-
-    const mergedPrs = entities.filter(
-      (e) => e.entityType === "PullRequest" && e.attributes.state === "merged"
-    );
-
-    for (const pr of mergedPrs) {
-      const prNum = Number(pr.attributes.number);
-      const reviewActId = `activity:pr-review:${prNum}`;
-
-      const prAssocs = relations.filter(
-        (r) => r.relationType === "wasAssociatedWith" && r.subjectId === reviewActId
-      );
-
-      // Authors include PR author association + commit authors informing this PR review
-      const authorCanonicalIds = new Set<string>();
-      for (const assoc of prAssocs) {
-        if (assoc.role === "author") {
-          authorCanonicalIds.add(canonicalAgentId(assoc.objectId));
-        }
-      }
-
-      const informedCommitIds = relations
-        .filter(
-          (r) =>
-            r.relationType === "wasInformedBy" &&
-            r.subjectId === reviewActId &&
-            r.objectId.startsWith("activity:commit:")
-        )
-        .map((r) => r.objectId);
-
-      for (const commitActId of informedCommitIds) {
-        for (const r of relations) {
-          if (
-            r.relationType === "wasAssociatedWith" &&
-            r.subjectId === commitActId &&
-            r.role === "author"
-          ) {
-            authorCanonicalIds.add(canonicalAgentId(r.objectId));
-          }
-        }
-      }
-
-      const reviewerAssocs = prAssocs.filter((r) => r.role === "reviewer");
-      if (reviewerAssocs.length === 0) {
-        findings.push({
-          nodeId: pr.id,
-          label: pr.label,
-          detail: `Merged pull request has no prov:wasAssociatedWith agent in role "reviewer".`,
-        });
-        continue;
-      }
-
-      const independentReviewers = reviewerAssocs.filter(
-        (r) => !authorCanonicalIds.has(canonicalAgentId(r.objectId))
-      );
-
-      if (independentReviewers.length === 0) {
-        const reviewerNames = reviewerAssocs
-          .map((r) => agentById.get(r.objectId)?.label ?? r.objectId)
-          .join(", ");
-        findings.push({
-          nodeId: pr.id,
-          label: pr.label,
-          detail: `Merged pull request was reviewed by ${reviewerNames} (role="reviewer"), who also authored the underlying changes (violates 4-eyes segregation of duties).`,
-        });
-      }
+    } finally {
+      fs.rmSync(tmpBundle, { force: true });
     }
+  }
+}
 
-    return findings;
-  },
-};
+function getOpaPolicy(wasmPath: string = DEFAULT_WASM_PATH): LoadedPolicy {
+  ensureFreshWasmBundle(wasmPath);
+  const wasmStat = fs.statSync(wasmPath);
+
+  if (!cachedPolicy || wasmPath !== DEFAULT_WASM_PATH || wasmStat.mtimeMs !== cachedWasmMtimeMs) {
+    const wasmBuffer = fs.readFileSync(wasmPath);
+    const loaded = loadPolicySync(wasmBuffer);
+    if (wasmPath === DEFAULT_WASM_PATH) {
+      cachedPolicy = loaded;
+      cachedWasmMtimeMs = wasmStat.mtimeMs;
+    }
+    return loaded;
+  }
+  return cachedPolicy;
+}
+
+function unwrapOpaResult<T>(rawResult: unknown, fallback: T): T {
+  if (Array.isArray(rawResult) && rawResult.length > 0 && rawResult[0] && "result" in rawResult[0]) {
+    return (rawResult[0] as { result: T }).result ?? fallback;
+  }
+  return fallback;
+}
 
 /**
- * Central registry of software development process-mining governance rules.
- * Add new GovernanceRule definitions here to include them automatically in reports, matrix compliance, and CLI checks.
+ * Loads rule metadata (id, category, severity, description) defined in policies/governance.rego
+ * and binds each rule's evaluate() function to the compiled OPA WebAssembly policy.
  */
-export const GOVERNANCE_RULES: readonly GovernanceRule[] = [
-  untrackedWorkRule,
-  unimplementedSpecRule,
-  missingTestCoverageRule,
-  fourEyesReviewRule,
-];
+export function loadGovernanceRulesFromOpa(wasmPath: string = DEFAULT_WASM_PATH): readonly GovernanceRule[] {
+  const policy = getOpaPolicy(wasmPath);
+  const metadataList = unwrapOpaResult<GovernanceRuleMetadata[]>(
+    policy.evaluate({}, "provtrace/governance/rules"),
+    []
+  );
+
+  return metadataList.map((meta) => ({
+    ...meta,
+    evaluate(ctx: GovernanceContext): GovernanceRuleFinding[] {
+      const allFindings = unwrapOpaResult<Record<string, GovernanceRuleFinding[]>>(
+        policy.evaluate(ctx, "provtrace/governance/findings"),
+        {}
+      );
+      return allFindings[meta.id] ?? [];
+    },
+  }));
+}
+
+/**
+ * Central registry of software development process-mining governance rules,
+ * loaded directly from the compiled OPA Rego policy (policies/governance.rego -> policies/policy.wasm).
+ */
+export const GOVERNANCE_RULES: readonly GovernanceRule[] = loadGovernanceRulesFromOpa();
 
 export function evaluateGovernanceRules(
   store: ProvStore,
@@ -217,6 +153,15 @@ export function evaluateGovernanceRules(
     relations: store.getRelations(),
     requirementTraces: precomputedTraces ?? store.getRequirementTraces(),
   };
+
+  // Fast path: evaluate the default Rego rule catalog in a single Wasm invocation
+  if (rules === GOVERNANCE_RULES) {
+    const policy = getOpaPolicy();
+    return unwrapOpaResult<ProcessAnomaly[]>(
+      policy.evaluate(ctx, "provtrace/governance/anomalies"),
+      []
+    );
+  }
 
   const anomalies: ProcessAnomaly[] = [];
   for (const rule of rules) {

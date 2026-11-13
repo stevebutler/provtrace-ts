@@ -8,11 +8,14 @@
     "extract": "node --no-warnings --import tsx src/cli-extract.ts",
     "dev": "node --no-warnings --import tsx --watch src/index.tsx",
     "start": "node --no-warnings --import tsx src/index.tsx",
+    "policy:test": "opa test policies/ -v",
+    "policy:build": "opa build -t wasm -e provtrace/governance/anomalies -e provtrace/governance/rules -e provtrace/governance/findings -o policies/bundle.tar.gz policies/governance.rego && tar -m -xzf policies/bundle.tar.gz -C policies /policy.wasm && rm -f policies/bundle.tar.gz",
     "test": "node --no-warnings --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
+    "@open-policy-agent/opa-wasm": "^1.10.0",
     "hono": "^4.7.4"
   },
   "devDependencies": {

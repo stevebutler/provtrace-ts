@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtractorContext } from "./git-extractor.js";
@@ -67,6 +68,26 @@ export function parseAsciiDocRequirements(content: string, relFilePath: string):
   return results;
 }
 
+function findIntroducingDocsCommit(
+  repoDir: string,
+  relPath: string,
+  reqCode: string
+): { shortSha: string; authorIso: string } | null {
+  try {
+    const out = execFileSync(
+      "git",
+      ["log", "-S", `[[${reqCode}]]`, "--reverse", "--format=%h%x1f%aI", "--", relPath],
+      { cwd: repoDir, encoding: "utf8" }
+    ).trim();
+    const firstLine = out.split(/\r?\n/)[0]?.trim();
+    if (!firstLine) return null;
+    const [shortSha, authorIso] = firstLine.split("\x1f");
+    return shortSha ? { shortSha, authorIso: authorIso ?? "" } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runAsciiDocExtractor(ctx: ExtractorContext) {
   const { store, repoDir, stepDelayMs = 0, onStep } = ctx;
   const docsDir = path.join(repoDir, "docs");
@@ -75,7 +96,6 @@ export async function runAsciiDocExtractor(ctx: ExtractorContext) {
   }
 
   const adocFiles = readdirSync(docsDir).filter((f) => f.endsWith(".adoc"));
-  const docRevisions = store.getEntities("DocumentRevision");
 
   let items = 0;
   let relations = 0;
@@ -85,20 +105,17 @@ export async function runAsciiDocExtractor(ctx: ExtractorContext) {
     const content = readFileSync(path.join(docsDir, fileName), "utf8");
     const parsedReqs = parseAsciiDocRequirements(content, relPath);
 
-    // Find the latest DocumentRevision in Git for this AsciiDoc file
-    const matchingRevs = docRevisions.filter((d) => d.attributes.path === relPath);
-    const latestDocRev = matchingRevs.at(-1) ?? null;
-
     for (let idx = 0; idx < parsedReqs.length; idx++) {
       const req = parsedReqs[idx];
       const reqEntityId = `entity:req:${req.code}`;
+      const authoringCommit = findIntroducingDocsCommit(repoDir, relPath, req.code);
 
       store.upsertEntity({
         id: reqEntityId,
         entityType: "Requirement",
         label: `${req.code}: ${req.title}`,
         source: "asciidoc",
-        createdAt: latestDocRev?.createdAt ?? null,
+        createdAt: authoringCommit?.authorIso || null,
         attributes: {
           code: req.code,
           title: req.title,
@@ -106,19 +123,22 @@ export async function runAsciiDocExtractor(ctx: ExtractorContext) {
           description: req.description,
           sourceRefs: req.sourceRefs,
           documentPath: relPath,
+          ...(authoringCommit ? { introducedInCommit: authoringCommit.shortSha } : {}),
         },
       });
       items++;
 
-      if (latestDocRev) {
-        store.addRelation({
-          relationType: "hadMember",
-          subjectId: latestDocRev.id,
-          objectId: reqEntityId,
-          role: "prov:Collection",
-          attributes: {},
-        });
-        relations++;
+      if (authoringCommit) {
+        const commitActivityId = `activity:commit:${authoringCommit.shortSha}`;
+        if (store.getActivityById(commitActivityId)) {
+          store.addRelation({
+            relationType: "wasGeneratedBy",
+            subjectId: reqEntityId,
+            objectId: commitActivityId,
+            attributes: {},
+          });
+          relations++;
+        }
       }
 
       const pct = Math.round(((idx + 1) / Math.max(parsedReqs.length, 1)) * 100);

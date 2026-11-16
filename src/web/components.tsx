@@ -642,8 +642,8 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
         >
           <table class="data-table matrix-table">
             <caption id="matrix-table-caption">
-              AsciiDoc requirement derivation coverage across GitHub Issues, PRs, Commits, and
-              Python artifacts
+              AsciiDoc requirement derivation coverage across GitHub Issues, PRs, Code Commits, and
+              Test Commits
             </caption>
             <thead>
               <tr>
@@ -651,8 +651,8 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                 <th scope="col">Compliance</th>
                 <th scope="col">GitHub Issues</th>
                 <th scope="col">Pull Requests</th>
-                <th scope="col">Commit Activities</th>
-                <th scope="col">Python Code &amp; Tests</th>
+                <th scope="col">Code Commits</th>
+                <th scope="col">Test Commits</th>
               </tr>
             </thead>
             <tbody>
@@ -727,38 +727,47 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                   </td>
                   <td>
                     <div class="chip-group">
-                      {row.commitActivities.length === 0 ? (
-                        <span style="color: var(--text-muted);">—</span>
+                      {row.codeCommits.length === 0 ? (
+                        <span style="color: var(--text-muted);">None</span>
                       ) : (
-                        row.commitActivities.map((c) => (
-                          <button
-                            type="button"
-                            key={c.id}
-                            class="entity-chip"
-                            {...dsClick(`@get('/api/focus?id=${encodeURIComponent(c.id)}')`)}
-                          >
-                            ⚡ {String(c.attributes.shortSha)}
-                          </button>
-                        ))
+                        row.codeCommits.map((c) => {
+                          const cats = (c.attributes.categories as string[] | undefined) ?? [];
+                          const files = (c.attributes.files as string[] | undefined) ?? [];
+                          return (
+                            <button
+                              type="button"
+                              key={c.id}
+                              class="entity-chip"
+                              title={files.join(", ")}
+                              {...dsClick(`@get('/api/focus?id=${encodeURIComponent(c.id)}')`)}
+                            >
+                              🐍 {String(c.attributes.shortSha)} [{cats.join(", ")}]
+                            </button>
+                          );
+                        })
                       )}
                     </div>
                   </td>
                   <td>
                     <div class="chip-group">
-                      {[...row.codeFiles, ...row.testFiles].length === 0 ? (
+                      {row.testCommits.length === 0 ? (
                         <span style="color: var(--text-muted);">None</span>
                       ) : (
-                        [...row.codeFiles, ...row.testFiles].map((f) => (
-                          <button
-                            type="button"
-                            key={f.id}
-                            class="entity-chip"
-                            {...dsClick(`@get('/api/focus?id=${encodeURIComponent(f.id)}')`)}
-                          >
-                            {f.entityType === "TestArtifact" ? "🧪 " : "🐍 "}
-                            {String(f.attributes.path)}@{String(f.attributes.shortSha)}
-                          </button>
-                        ))
+                        row.testCommits.map((c) => {
+                          const cats = (c.attributes.categories as string[] | undefined) ?? [];
+                          const files = (c.attributes.files as string[] | undefined) ?? [];
+                          return (
+                            <button
+                              type="button"
+                              key={c.id}
+                              class="entity-chip"
+                              title={files.join(", ")}
+                              {...dsClick(`@get('/api/focus?id=${encodeURIComponent(c.id)}')`)}
+                            >
+                              🧪 {String(c.attributes.shortSha)} [{cats.join(", ")}]
+                            </button>
+                          );
+                        })
                       )}
                     </div>
                   </td>
@@ -824,7 +833,13 @@ export const ReportsSection: FC<{ store: ProvStore }> = ({ store }) => {
                       {(activity.endedAt ?? activity.startedAt ?? "").replace("T", " ").slice(0, 16)}
                     </td>
                     <td>
-                      <span class="badge neutral">{activity.activityType}</span>
+                      <span class="badge neutral">
+                        {activity.activityType === "CommitActivity" &&
+                        Array.isArray(activity.attributes.categories) &&
+                        activity.attributes.categories.length > 0
+                          ? `Commit [${(activity.attributes.categories as string[]).join(", ")}]`
+                          : activity.activityType}
+                      </span>
                     </td>
                     <td>
                       {associations.length === 0 ? (

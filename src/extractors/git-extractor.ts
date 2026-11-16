@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import type { ProvStore } from "../db/store.js";
-import type { EntityType } from "../prov/types.js";
+import type { CommitCategory } from "../prov/types.js";
 
 export interface ExtractorContext {
   store: ProvStore;
@@ -17,14 +17,32 @@ export interface ExtractorContext {
 
 const sleep = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 
-function classifyPath(filePath: string): EntityType {
-  if (filePath.startsWith("docs/") || filePath.endsWith(".adoc")) {
-    return "DocumentRevision";
+const CATEGORY_ORDER: readonly CommitCategory[] = ["code", "tests", "docs", "config"];
+
+export function classifyFileCategory(filePath: string): CommitCategory {
+  if (
+    filePath.startsWith("docs/") ||
+    filePath.endsWith(".adoc") ||
+    filePath.endsWith(".md") ||
+    filePath.endsWith(".txt")
+  ) {
+    return "docs";
   }
   if (filePath.startsWith("tests/") || filePath.includes("test_")) {
-    return "TestArtifact";
+    return "tests";
   }
-  return "CodeArtifact";
+  if (filePath.startsWith("src/") && !filePath.endsWith("__init__.py")) {
+    return "code";
+  }
+  return "config";
+}
+
+export function classifyCommitCategories(filePaths: string[]): CommitCategory[] {
+  const seen = new Set<CommitCategory>();
+  for (const fp of filePaths) {
+    seen.add(classifyFileCategory(fp));
+  }
+  return CATEGORY_ORDER.filter((cat) => seen.has(cat));
 }
 
 export async function runGitExtractor(ctx: ExtractorContext) {
@@ -48,7 +66,6 @@ export async function runGitExtractor(ctx: ExtractorContext) {
 
   let items = 0;
   let relations = 0;
-  const previousFileRevision = new Map<string, string>();
 
   for (let i = 0; i < rawCommits.length; i++) {
     const parts = rawCommits[i].split("\x1f");
@@ -65,15 +82,19 @@ export async function runGitExtractor(ctx: ExtractorContext) {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const parts = line.split("\t");
-        const status = parts[0] ?? "M";
+        const lineParts = line.split("\t");
+        const status = lineParts[0] ?? "M";
         if (status.startsWith("R")) {
-          return { status: "R", oldPath: parts[1] ?? "", filePath: parts[2] ?? "" };
+          return { status: "R", oldPath: lineParts[1] ?? "", filePath: lineParts[2] ?? "" };
         }
-        return { status: status[0] ?? "M", oldPath: null, filePath: parts[1] ?? "" };
+        return { status: status[0] ?? "M", oldPath: null, filePath: lineParts[1] ?? "" };
       })
       .filter((entry) => Boolean(entry.filePath));
+
     const files = fileChanges.filter((fc) => fc.status !== "D").map((fc) => fc.filePath);
+    const deletedFiles = fileChanges.filter((fc) => fc.status === "D").map((fc) => fc.filePath);
+    const allTouchedPaths = fileChanges.map((fc) => fc.filePath);
+    const categories = classifyCommitCategories(files.length > 0 ? files : allTouchedPaths);
 
     const agentId = `agent:git:${authorEmail.toLowerCase()}`;
     store.upsertAgent({
@@ -101,7 +122,9 @@ export async function runGitExtractor(ctx: ExtractorContext) {
         body: body.trim(),
         fullMessage: `${subject}\n${body}`.trim(),
         authorEmail: authorEmail.toLowerCase(),
+        categories,
         files,
+        deletedFiles,
         filesCount: files.length,
       },
     });
@@ -128,93 +151,12 @@ export async function runGitExtractor(ctx: ExtractorContext) {
       relations++;
     }
 
-    // File-level artifact entities generated or invalidated by this CommitActivity
-    for (const change of fileChanges) {
-      if (change.status === "D") {
-        const prevFileId = previousFileRevision.get(change.filePath);
-        if (prevFileId) {
-          store.addRelation({
-            relationType: "wasInvalidatedBy",
-            subjectId: prevFileId,
-            objectId: activityId,
-            role: "git:fileDeleted",
-            attributes: { time: authorIso, path: change.filePath },
-          });
-          relations++;
-          previousFileRevision.delete(change.filePath);
-        }
-        continue;
-      }
-
-      const filePath = change.filePath;
-      const fileEntityType = classifyPath(filePath);
-      const fileEntityId = `entity:file:${filePath}@${shortSha}`;
-      store.upsertEntity({
-        id: fileEntityId,
-        entityType: fileEntityType,
-        label: `${filePath} @ ${shortSha}`,
-        source: "git-repo",
-        createdAt: authorIso,
-        attributes: {
-          path: filePath,
-          commitSha: sha,
-          shortSha,
-        },
-      });
-      items++;
-
-      store.addRelation({
-        relationType: "wasGeneratedBy",
-        subjectId: fileEntityId,
-        objectId: activityId,
-        attributes: {},
-      });
-      store.addRelation({
-        relationType: "wasAttributedTo",
-        subjectId: fileEntityId,
-        objectId: agentId,
-        attributes: {},
-      });
-      relations += 2;
-
-      const prevLookupPath = change.status === "R" && change.oldPath ? change.oldPath : filePath;
-      const prevFileId = previousFileRevision.get(prevLookupPath);
-      if (prevFileId) {
-        if (change.status === "R" && change.oldPath) {
-          store.addRelation({
-            relationType: "wasInvalidatedBy",
-            subjectId: prevFileId,
-            objectId: activityId,
-            role: "git:fileRenamed",
-            attributes: { time: authorIso, oldPath: change.oldPath, newPath: filePath },
-          });
-          relations++;
-          previousFileRevision.delete(change.oldPath);
-        }
-        store.addRelation({
-          relationType: "wasRevisionOf",
-          subjectId: fileEntityId,
-          objectId: prevFileId,
-          role: "prov:Revision",
-          attributes: {},
-        });
-        store.addRelation({
-          relationType: "used",
-          subjectId: activityId,
-          objectId: prevFileId,
-          attributes: {},
-        });
-        relations += 2;
-      }
-      previousFileRevision.set(filePath, fileEntityId);
-    }
-
     const pct = Math.round(((i + 1) / rawCommits.length) * 100);
     await onStep?.({
       progressPct: pct,
       itemsProcessed: items,
       relationsCreated: relations,
-      message: `Processed commit activity ${shortSha} (${fileChanges.length} file changes): "${subject}"`,
+      message: `Classified commit ${shortSha} [${categories.join(", ")}]: "${subject}"`,
     });
     await sleep(stepDelayMs);
   }

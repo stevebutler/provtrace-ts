@@ -2,10 +2,9 @@ export type EntityType =
   | "Issue"
   | "Bug"
   | "Requirement"
-  | "DocumentRevision"
-  | "PullRequest"
-  | "CodeArtifact"
-  | "TestArtifact";
+  | "PullRequest";
+
+export type CommitCategory = "code" | "tests" | "docs" | "config";
 
 export type ActivityType =
   | "IssueReport"
@@ -110,8 +109,8 @@ export interface RequirementTrace {
   issues: ProvEntity[];
   pullRequests: ProvEntity[];
   commitActivities: ProvActivity[];
-  codeFiles: ProvEntity[];
-  testFiles: ProvEntity[];
+  codeCommits: ProvActivity[];
+  testCommits: ProvActivity[];
 }
 
 export interface RequirementTraceRow extends RequirementTrace {

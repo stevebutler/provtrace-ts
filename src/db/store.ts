@@ -30,22 +30,25 @@ export const LOADER_DEFINITIONS: Array<{
     loaderName: "git-commits",
     title: "Git Repository Extractor",
     description:
-      "Extracts commit activities (prov:Activity), file revisions (prov:Entity), and Git author agents.",
+      "Extracts commit activities (prov:Activity), classifies repo areas touched (code, tests, docs, config), and links Git author agents.",
   },
   {
     loaderName: "asciidoc-specs",
     title: "AsciiDoc Specification Extractor",
-    description: "Parses docs/*.adoc requirement blocks (REQ-*) and links them to Git document revisions.",
+    description:
+      "Parses docs/*.adoc requirement blocks (REQ-*) and links them to the docs commit activity that authored them.",
   },
   {
     loaderName: "github-issues",
     title: "GitHub Issues & PRs Extractor",
-    description: "Loads Issues, Bugs, Pull Requests, review activities, and GitHub agents from JSON fixtures.",
+    description:
+      "Loads Issues, Bugs, Pull Requests, review activities, and GitHub agents from JSON fixtures.",
   },
   {
     loaderName: "prov-linker",
     title: "W3C PROV Cross-Source Linker",
-    description: "Connects Issues, Requirements, Commit Activities, PRs, Code, and Tests via PROV relations.",
+    description:
+      "Connects Issues, Requirements, categorized Commit Activities, and Pull Requests (as commit collections) via PROV relations.",
   },
 ];
 
@@ -405,7 +408,7 @@ export class ProvStore {
 
     const matrix = this.getRequirementsMatrix();
     const requirementsTotal = matrix.length;
-    const requirementsImplemented = matrix.filter((r) => r.codeFiles.length > 0).length;
+    const requirementsImplemented = matrix.filter((r) => r.codeCommits.length > 0).length;
     const requirementsCompliant = matrix.filter((r) => r.compliant).length;
 
     const commitActivities = this.getActivities().filter(
@@ -503,72 +506,70 @@ export class ProvStore {
       }
 
       const linkedIssueIds = new Set<string>();
+      const downstreamIssueIds = new Set<string>();
       for (const up of derivedTargets.get(req.id) ?? []) {
         if (up.startsWith("entity:issue:")) linkedIssueIds.add(up);
       }
       for (const down of downstream) {
-        if (down.startsWith("entity:issue:")) linkedIssueIds.add(down);
-      }
-
-      const codeFiles: ProvEntity[] = [];
-      const testFiles: ProvEntity[] = [];
-      const pullRequestIds = new Set<string>();
-      const artifactIds = new Set<string>();
-
-      for (const id of downstream) {
-        const ent = allEntities.get(id);
-        if (!ent) continue;
-        if (ent.entityType === "CodeArtifact") {
-          codeFiles.push(ent);
-          artifactIds.add(ent.id);
-        }
-        if (ent.entityType === "TestArtifact") {
-          testFiles.push(ent);
-          artifactIds.add(ent.id);
-        }
-        if (ent.entityType === "PullRequest") pullRequestIds.add(ent.id);
-      }
-
-      for (const issueId of linkedIssueIds) {
-        for (const child of derivedFromObject.get(issueId) ?? []) {
-          const ent = allEntities.get(child);
-          if (ent?.entityType === "PullRequest") pullRequestIds.add(ent.id);
+        if (down.startsWith("entity:issue:")) {
+          linkedIssueIds.add(down);
+          downstreamIssueIds.add(down);
         }
       }
 
-      // Also include any PullRequest (prov:Collection) that contains a generated artifact via hadMember
-      for (const rel of allRelations) {
-        if (
-          rel.relationType === "hadMember" &&
-          artifactIds.has(rel.objectId) &&
-          rel.subjectId.startsWith("entity:pr:")
-        ) {
-          pullRequestIds.add(rel.subjectId);
-        }
-      }
-
-      // Collect CommitActivities that used this requirement or generated its code/test artifacts
+      // Collect CommitActivities that authored (wasGeneratedBy) or implemented (used) this requirement
       const commitActIds = new Set<string>();
       for (const rel of allRelations) {
         if (
-          rel.relationType === "used" &&
-          rel.objectId === req.id &&
-          rel.subjectId.startsWith("activity:commit:")
-        ) {
-          commitActIds.add(rel.subjectId);
-        }
-        if (
           rel.relationType === "wasGeneratedBy" &&
-          artifactIds.has(rel.subjectId) &&
+          rel.subjectId === req.id &&
           rel.objectId.startsWith("activity:commit:")
         ) {
           commitActIds.add(rel.objectId);
+        }
+        if (
+          rel.relationType === "used" &&
+          rel.subjectId.startsWith("activity:commit:") &&
+          (rel.objectId === req.id || downstreamIssueIds.has(rel.objectId))
+        ) {
+          commitActIds.add(rel.subjectId);
         }
       }
 
       const commitActivities = [...commitActIds]
         .map((id) => allActivities.get(id))
         .filter((a): a is ProvActivity => Boolean(a));
+
+      const hasCategory = (act: ProvActivity, category: string): boolean => {
+        const cats = (act.attributes.categories as string[] | undefined) ?? [];
+        return cats.includes(category);
+      };
+
+      const codeCommits = commitActivities.filter((a) => hasCategory(a, "code"));
+      const testCommits = commitActivities.filter((a) => hasCategory(a, "tests"));
+      const implementationCommitIds = new Set(
+        commitActivities
+          .filter((a) => hasCategory(a, "code") || hasCategory(a, "tests"))
+          .map((a) => a.id)
+      );
+
+      // Collect PullRequests that contain any implementation commit of this requirement via hadMember
+      const pullRequestIds = new Set<string>();
+      for (const rel of allRelations) {
+        if (
+          rel.relationType === "hadMember" &&
+          rel.subjectId.startsWith("entity:pr:") &&
+          implementationCommitIds.has(rel.objectId)
+        ) {
+          pullRequestIds.add(rel.subjectId);
+        }
+      }
+      for (const issueId of downstreamIssueIds) {
+        for (const child of derivedFromObject.get(issueId) ?? []) {
+          const ent = allEntities.get(child);
+          if (ent?.entityType === "PullRequest") pullRequestIds.add(ent.id);
+        }
+      }
 
       const issues = [...linkedIssueIds]
         .map((id) => allEntities.get(id))
@@ -585,8 +586,8 @@ export class ProvStore {
         issues,
         pullRequests,
         commitActivities,
-        codeFiles,
-        testFiles,
+        codeCommits,
+        testCommits,
       };
     });
   }
@@ -680,10 +681,15 @@ export class ProvStore {
       });
     }
     for (const act of this.getActivities()) {
+      const categories = (act.attributes.categories as string[] | undefined) ?? [];
+      const subType =
+        act.activityType === "CommitActivity" && categories.length > 0
+          ? `Commit [${categories.join(", ")}]`
+          : act.activityType;
       allNodes.set(act.id, {
         id: act.id,
         kind: "activity",
-        subType: act.activityType,
+        subType,
         label: act.label,
         shortId: act.id.replace(/^activity:[^:]+:/, ""),
       });
@@ -699,17 +705,10 @@ export class ProvStore {
     }
 
     const allRelations = this.getRelations();
-    const skippedShortcutRoles = new Set([
-      "provtrace:satisfiesRequirement",
-      "provtrace:implementsIssue",
-      "provtrace:documentsIssue",
-    ]);
     const cleanRelations = allRelations.filter((r) => {
-      if (r.relationType !== "wasDerivedFrom") return true;
-      if (skippedShortcutRoles.has(r.role ?? "")) return false;
-      // Only include the 4-column PR -> Issue shortcut when directly focusing that PR or Issue
-      if (r.role === "provtrace:resolvesIssue") {
-        return r.subjectId === focusId || r.objectId === focusId;
+      // Only include the 3-column PR -> Issue shortcut when directly focusing that PR or Issue in 1-hop mode
+      if (r.relationType === "wasDerivedFrom" && r.role === "provtrace:resolvesIssue") {
+        return mode === "1hop" && (r.subjectId === focusId || r.objectId === focusId);
       }
       return true;
     });
@@ -746,96 +745,70 @@ export class ProvStore {
         return { nodes, edges };
       }
 
-      // Full Lineage mode: directional upstream + downstream derivation without sibling fan-out
-      const derivedUp = new Map<string, Set<string>>();
-      const derivedDown = new Map<string, Set<string>>();
-      for (const r of allRelations) {
-        if (r.relationType === "wasDerivedFrom" || r.relationType === "wasRevisionOf") {
-          if (!derivedDown.has(r.objectId)) derivedDown.set(r.objectId, new Set());
-          derivedDown.get(r.objectId)!.add(r.subjectId);
-          if (!derivedUp.has(r.subjectId)) derivedUp.set(r.subjectId, new Set());
-          derivedUp.get(r.subjectId)!.add(r.objectId);
-        }
-      }
-
-      const seeds = new Set<string>([focusId]);
-      const directNeighbors = new Set<string>([focusId]);
+      // Full Lineage mode: directional upstream + downstream causal flow across Issues -> Requirements -> Commits -> PRs
+      const forward = new Map<string, Set<string>>();
+      const backward = new Map<string, Set<string>>();
+      const addCausalStep = (upstreamId: string, downstreamId: string) => {
+        if (!forward.has(upstreamId)) forward.set(upstreamId, new Set());
+        forward.get(upstreamId)!.add(downstreamId);
+        if (!backward.has(downstreamId)) backward.set(downstreamId, new Set());
+        backward.get(downstreamId)!.add(upstreamId);
+      };
 
       for (const r of cleanRelations) {
-        if (r.subjectId === focusId && allNodes.has(r.objectId)) {
-          directNeighbors.add(r.objectId);
-        }
-        if (r.objectId === focusId && allNodes.has(r.subjectId)) {
-          directNeighbors.add(r.subjectId);
-        }
-        if (r.relationType === "hadMember" && r.subjectId === focusId) {
-          seeds.add(r.objectId);
-        }
-        if (
-          focusId.startsWith("activity:") &&
-          (r.subjectId === focusId || r.objectId === focusId) &&
-          causalRelationTypes.has(r.relationType)
-        ) {
-          const otherId = r.subjectId === focusId ? r.objectId : r.subjectId;
-          if (otherId.startsWith("entity:") && !otherId.startsWith("entity:file:docs/")) {
-            seeds.add(otherId);
-          }
+        if (r.relationType === "wasDerivedFrom" || r.relationType === "wasRevisionOf") {
+          addCausalStep(r.objectId, r.subjectId);
+        } else if (r.relationType === "used" && r.subjectId.startsWith("activity:commit:")) {
+          addCausalStep(r.objectId, r.subjectId);
+        } else if (r.relationType === "hadMember" && r.subjectId.startsWith("entity:pr:")) {
+          addCausalStep(r.objectId, r.subjectId);
         }
       }
 
-      const coreEntities = new Set<string>(seeds);
+      const keep = new Set<string>([focusId]);
 
-      // 1. Walk strictly upstream from seeds
-      let queue = [...seeds];
+      // 1. Walk strictly upstream from focusId
+      let queue = [focusId];
       const seenUp = new Set<string>(queue);
       while (queue.length > 0) {
         const cur = queue.shift()!;
-        for (const up of derivedUp.get(cur) ?? []) {
+        for (const up of backward.get(cur) ?? []) {
           if (!seenUp.has(up) && allNodes.has(up)) {
             seenUp.add(up);
-            coreEntities.add(up);
+            keep.add(up);
             queue.push(up);
           }
         }
       }
 
-      // 2. Walk strictly downstream from seeds (never feeding upstream ancestors back down)
-      queue = [...seeds];
+      // 2. Walk strictly downstream from focusId (never reversing direction at upstream hubs)
+      queue = [focusId];
       const seenDown = new Set<string>(queue);
       while (queue.length > 0) {
         const cur = queue.shift()!;
-        for (const down of derivedDown.get(cur) ?? []) {
+        for (const down of forward.get(cur) ?? []) {
           if (!seenDown.has(down) && allNodes.has(down)) {
             seenDown.add(down);
-            coreEntities.add(down);
+            keep.add(down);
             queue.push(down);
           }
         }
       }
 
-      const keep = new Set<string>([...coreEntities, ...directNeighbors]);
+      // Attach authoring docs commits (wasGeneratedBy) for any Requirement in the lineage
+      // and include direct 1-hop neighbors when focusing an Activity or Agent
       for (const r of cleanRelations) {
         if (
-          r.relationType === "hadMember" &&
-          r.subjectId.startsWith("entity:file:docs/") &&
-          coreEntities.has(r.objectId)
-        ) {
-          keep.add(r.subjectId);
-        }
-        if (
-          r.relationType === "hadMember" &&
-          r.subjectId.startsWith("entity:pr:") &&
-          coreEntities.has(r.objectId)
-        ) {
-          keep.add(r.subjectId);
-        }
-        if (
           r.relationType === "wasGeneratedBy" &&
-          coreEntities.has(r.subjectId) &&
-          r.objectId.startsWith("activity:commit:") &&
-          !r.subjectId.startsWith("entity:file:docs/")
+          r.subjectId.startsWith("entity:req:") &&
+          keep.has(r.subjectId) &&
+          allNodes.has(r.objectId)
         ) {
           keep.add(r.objectId);
+        }
+        if (focusId.startsWith("activity:") || focusId.startsWith("agent:")) {
+          if (r.subjectId === focusId && allNodes.has(r.objectId)) keep.add(r.objectId);
+          if (r.objectId === focusId && allNodes.has(r.subjectId)) keep.add(r.subjectId);
         }
       }
 
@@ -855,9 +828,9 @@ export class ProvStore {
       return { nodes, edges };
     }
 
-    // Overview graph: show Entities + CommitActivities bridged by wasGeneratedBy, used, and direct structural wasDerivedFrom
+    // Overview graph: show Entities + CommitActivities bridged by wasGeneratedBy, used, hadMember, and wasDerivedFrom
     const overviewNodes = [...allNodes.values()].filter(
-      (n) => n.kind === "entity" || (n.kind === "activity" && n.subType === "CommitActivity")
+      (n) => n.kind === "entity" || (n.kind === "activity" && n.id.startsWith("activity:commit:"))
     );
     const overviewSet = new Set(overviewNodes.map((n) => n.id));
 
@@ -905,8 +878,7 @@ export class ProvStore {
   exportProvJson() {
     const entity: Record<string, unknown> = {};
     for (const e of this.getEntities()) {
-      const isCollection =
-        e.entityType === "DocumentRevision" || e.entityType === "PullRequest";
+      const isCollection = e.entityType === "PullRequest";
       entity[e.id] = {
         "prov:type": isCollection
           ? ["prov:Collection", `provtrace:${e.entityType}`]

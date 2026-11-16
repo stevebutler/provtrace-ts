@@ -25,32 +25,27 @@ export interface GraphLayoutResult {
 function getColumnForNode(node: ProvGraphNode): number {
   if (node.kind === "agent") return 0;
   if (node.kind === "activity") {
-    if (node.subType === "PullRequestReview") return 4;
+    if (node.subType === "PullRequestReview") return 3;
     if (node.subType === "IssueReport" || node.subType === "IssueResolution") return 0;
-    return 2; // CommitActivity & SpecAuthoring bridge specs/issues -> generated files
+    return 2; // CommitActivity & SpecAuthoring
   }
   switch (node.subType) {
     case "Issue":
     case "Bug":
       return 0;
-    case "DocumentRevision":
     case "Requirement":
       return 1;
-    case "CodeArtifact":
-    case "TestArtifact":
-      return 3;
     case "PullRequest":
     default:
-      return 4;
+      return 3;
   }
 }
 
 const COLUMN_TITLES: Record<number, string> = {
   0: "Issues & Agents",
   1: "Specs & Requirements",
-  2: "Commit Activities",
-  3: "Code & Test Files",
-  4: "Pull Requests",
+  2: "Commits (by Repo Area)",
+  3: "Pull Requests",
 };
 
 export function computeProvGraphLayout(
@@ -58,7 +53,7 @@ export function computeProvGraphLayout(
   edges: ProvGraphEdge[]
 ): GraphLayoutResult {
   const colBuckets = new Map<number, ProvGraphNode[]>();
-  for (let c = 0; c <= 4; c++) colBuckets.set(c, []);
+  for (let c = 0; c <= 3; c++) colBuckets.set(c, []);
 
   for (const node of nodes) {
     const col = getColumnForNode(node);
@@ -145,18 +140,39 @@ export function computeProvGraphLayout(
       continue;
     }
 
+    const colSpan = Math.abs(src.column - dst.column);
     const dx = Math.abs(x2 - x1) * 0.45;
     const c1x = src.x > dst.x ? x1 - dx : x1 + dx;
     const c2x = src.x > dst.x ? x2 + dx : x2 - dx;
-    const colSpan = Math.abs(src.column - dst.column);
-    const arcY = colSpan > 1 ? -26 - (colSpan - 2) * 8 : 0;
-    const pathD = `M ${x1} ${y1} C ${c1x} ${y1 + arcY}, ${c2x} ${y2 + arcY}, ${x2} ${y2}`;
+
+    let c1y = y1;
+    let c2y = y2;
+    if (colSpan > 1) {
+      if (src.y === dst.y) {
+        // Route multi-column same-row edges through the inter-row corridor above the boxes
+        y1 = src.y + 10;
+        y2 = dst.y + 10;
+        const corridorY = src.y - 14;
+        c1y = corridorY;
+        c2y = corridorY;
+      } else {
+        // Route multi-column cross-row edges through the horizontal gap between rows
+        const goingDown = dst.y > src.y;
+        y1 = goingDown ? src.y + src.height - 10 : src.y + 10;
+        y2 = goingDown ? dst.y + 10 : dst.y + dst.height - 10;
+        const corridorY = goingDown ? src.y + src.height + 9 : src.y - 9;
+        c1y = corridorY;
+        c2y = corridorY;
+      }
+    }
+
+    const pathD = `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
 
     positionedEdges.push({
       ...edge,
       pathD,
       labelX: (x1 + x2) / 2,
-      labelY: (y1 + y2) / 2 + arcY * 0.65 - 4,
+      labelY: (c1y + c2y) / 2 - 4,
     });
   }
 

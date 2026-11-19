@@ -8,9 +8,9 @@ If you are unfamiliar with W3C PROV, see the [W3C PROV Model Primer](https://www
 
 ProvTrace extracts artifacts, events, and actors across three development sources for a sample Python project (`target-project/` — `acme/pyledger`):
 
-1. **Local Git Repository (`git-commits`)**: Commit activities (`prov:Activity`), Python source & test file revisions (`prov:Entity`), file revision chains (`prov:wasRevisionOf`), file deletions (`prov:wasInvalidatedBy`), and Git author agents.
-2. **AsciiDoc Specifications in Git (`asciidoc-specs`)**: Structured `[[REQ-...]]` sections in `docs/requirements.adoc`, linked as members (`prov:hadMember`) of `prov:Collection` document revisions.
-3. **GitHub Issues & Pull Requests (`github-issues`)**: Issues, bugs, `prov:Collection` pull requests, review/resolution activities, issue/PR closure invalidations (`prov:wasInvalidatedBy`), and qualified `prov:Association` agent roles (`author`, `reviewer`, `reporter`, `resolver`) from `fixtures/github.json`.
+1. **Local Git Repository (`git-commits`)**: Commit activities (`prov:Activity`) classified by repository area touched (`code`, `tests`, `docs`, `config`), parent commit chains (`prov:wasInformedBy`), and Git author agents—avoiding per-file-version node explosion.
+2. **AsciiDoc Specifications in Git (`asciidoc-specs`)**: Structured `[[REQ-...]]` sections in `docs/requirements.adoc`, linked via `prov:wasGeneratedBy` to the `docs` commit activity that authored them.
+3. **GitHub Issues & Pull Requests (`github-issues`)**: Issues, bugs, `prov:Collection` pull requests (modeled as collections of commits via `prov:hadMember`), review/resolution activities, issue/PR closure invalidations (`prov:wasInvalidatedBy`), and qualified `prov:Association` agent roles (`author`, `reviewer`, `reporter`, `resolver`) from `fixtures/github.json`.
 4. **W3C PROV Cross-Source Linker (`prov-linker`)**: Connects entities, activities, and agents across sources using `prov:wasDerivedFrom`, `prov:wasRevisionOf`, `prov:hadMember`, `prov:wasGeneratedBy`, `prov:wasInvalidatedBy`, `prov:used`, `prov:wasAttributedTo`, `prov:wasAssociatedWith`, `prov:wasInformedBy`, and `prov:actedOnBehalfOf`.
 
 ## Web UI Features
@@ -48,6 +48,10 @@ npm run policy:build
 npm run typecheck
 npm test
 ```
+
+## Cloud Run Deployment & Screened Access
+
+ProvTrace ships with a multi-stage [`Dockerfile`](Dockerfile), read-only preview mode (`READ_ONLY_MODE=true`), and built-in Google OAuth 2.0 + email allowlist authentication (`ALLOWED_GOOGLE_EMAILS`). See [`docs/DEPLOY_CLOUD_RUN.md`](docs/DEPLOY_CLOUD_RUN.md) and [`.env.example`](.env.example) for setup instructions.
 
 ## AI contributions
 

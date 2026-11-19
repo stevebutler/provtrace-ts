@@ -7,3 +7,6 @@ data/*.db-shm
 target-project/
 policies/*.tar.gz
 policies/*.wasm
+.env
+.env.local
+.env.*.local

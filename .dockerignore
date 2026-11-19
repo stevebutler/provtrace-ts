@@ -1,0 +1,16 @@
+.git
+.gitignore
+.agents
+node_modules
+data
+target-project
+dist
+.env
+.env.*
+!.env.example
+policies/*.tar.gz
+policies/*.wasm
+README.md
+AGENTS.md
+docs
+tests

@@ -7,6 +7,13 @@ import { ProvStore } from "./db/store.js";
 import { ExtractionPipeline } from "./extractors/pipeline.js";
 import type { GraphFocusMode, LoaderName } from "./prov/types.js";
 import {
+  type AuthConfig,
+  createAuthMiddleware,
+  getAuthenticatedUser,
+  loadAuthConfigFromEnv,
+  registerAuthRoutes,
+} from "./web/auth.js";
+import {
   AppPage,
   ExplorerSection,
   KpiSection,
@@ -15,9 +22,34 @@ import {
 } from "./web/components.js";
 import { formatDatastarPatchElements } from "./web/sse.js";
 
-export function createApp(store = new ProvStore(), pipeline = new ExtractionPipeline(store)) {
+export interface AppOptions {
+  readOnly?: boolean;
+  auth?: AuthConfig;
+}
+
+export function createApp(
+  store = new ProvStore(),
+  pipeline = new ExtractionPipeline(store),
+  options: AppOptions = {}
+) {
+  const readOnly = options.readOnly ?? process.env.READ_ONLY_MODE === "true";
+  const authConfig = options.auth ?? loadAuthConfigFromEnv();
+
   const app = new Hono();
   const datastarJsPath = path.resolve(process.cwd(), "public/datastar.js");
+
+  // Health check endpoint (always accessible for Cloud Run startup/liveness probes)
+  app.get("/healthz", (c) => {
+    return c.json({
+      status: "ok",
+      readOnly,
+      authEnabled: authConfig.enabled,
+    });
+  });
+
+  // Google OAuth sign-in, callback, logout routes & allowlist middleware
+  registerAuthRoutes(app, authConfig);
+  app.use("*", createAuthMiddleware(authConfig));
 
   app.get("/public/datastar.js", (c) => {
     const js = readFileSync(datastarJsPath, "utf8");
@@ -30,13 +62,26 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
   app.get("/", (c) => {
     const focusId = c.req.query("focus") || undefined;
     const focusMode: GraphFocusMode = c.req.query("mode") === "lineage" ? "lineage" : "1hop";
+    const currentUser = getAuthenticatedUser(c, authConfig);
     return c.html(
-      `<!DOCTYPE html>${(<AppPage store={store} isRunning={pipeline.isRunning} focusId={focusId} focusMode={focusMode} />).toString()}`
+      `<!DOCTYPE html>${(
+        <AppPage
+          store={store}
+          isRunning={pipeline.isRunning}
+          focusId={focusId}
+          focusMode={focusMode}
+          readOnly={readOnly}
+          currentUser={currentUser}
+        />
+      ).toString()}`
     );
   });
 
   // Persistent Datastar SSE stream for live loader progress and dashboard updates
   app.get("/api/stream", (c) => {
+    if (readOnly) {
+      return c.text("SSE stream disabled in read-only mode", 403);
+    }
     return streamSSE(c, async (stream) => {
       let closed = false;
       stream.onAbort(() => {
@@ -46,7 +91,7 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
       const pushDashboardUpdate = async (opts?: { fullRefresh?: boolean }) => {
         if (closed) return;
         const loadersHtml = (
-          <LoadersSection store={store} isRunning={pipeline.isRunning} />
+          <LoadersSection store={store} isRunning={pipeline.isRunning} readOnly={readOnly} />
         ).toString();
         await stream.writeSSE(formatDatastarPatchElements(loadersHtml));
 
@@ -87,6 +132,9 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
 
   // Trigger full extraction pipeline asynchronously (progress streams via /api/stream)
   app.post("/api/loaders/run-all", (c) => {
+    if (readOnly) {
+      return c.json({ error: "Read-only mode: pipeline mutations are disabled." }, 403);
+    }
     void pipeline.runAllLoaders(220);
     const loadersHtml = (<LoadersSection store={store} isRunning={true} />).toString();
     return c.body(loadersHtml, 200, { "Content-Type": "text/html; charset=utf-8" });
@@ -94,6 +142,9 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
 
   // Trigger a single loader asynchronously
   app.post("/api/loaders/run", (c) => {
+    if (readOnly) {
+      return c.json({ error: "Read-only mode: pipeline mutations are disabled." }, 403);
+    }
     const loader = c.req.query("loader") as LoaderName | undefined;
     const valid: LoaderName[] = [
       "git-commits",
@@ -111,6 +162,9 @@ export function createApp(store = new ProvStore(), pipeline = new ExtractionPipe
 
   // Reset database & broadcast empty state
   app.post("/api/loaders/reset", (c) => {
+    if (readOnly) {
+      return c.json({ error: "Read-only mode: store reset is disabled." }, 403);
+    }
     if (!pipeline.isRunning) {
       store.resetAllData();
       store.appendLog("system", "info", "Reset SQLite PROV database.");
@@ -150,9 +204,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   const port = Number(process.env.PORT ?? 3000);
+  const hostname = process.env.HOST ?? "0.0.0.0";
   const app = createApp(store, pipeline);
 
-  serve({ fetch: app.fetch, port }, (info) => {
-    console.log(`ProvTrace web app listening on http://localhost:${info.port}`);
+  serve({ fetch: app.fetch, port, hostname }, (info) => {
+    console.log(`ProvTrace web app listening on http://${info.address}:${info.port}`);
   });
 }

@@ -59,11 +59,14 @@ function ensureFreshWasmBundle(wasmPath: string): void {
   if (wasmPath !== DEFAULT_WASM_PATH || !DEFAULT_REGO_FILES.every((f) => fs.existsSync(f))) {
     return;
   }
+  const wasmExists = fs.existsSync(wasmPath);
+  if (wasmExists && (process.env.NODE_ENV === "production" || process.env.SKIP_OPA_AUTOBUILD === "true")) {
+    return;
+  }
   const latestRegoMtimeMs = Math.max(
     ...DEFAULT_REGO_FILES.map((f) => fs.statSync(f).mtimeMs),
     fs.existsSync(DEFAULT_SCHEMA_PATH) ? fs.statSync(DEFAULT_SCHEMA_PATH).mtimeMs : 0
   );
-  const wasmExists = fs.existsSync(wasmPath);
   const wasmStat = wasmExists ? fs.statSync(wasmPath) : null;
 
   if (!wasmStat || latestRegoMtimeMs > wasmStat.mtimeMs) {
@@ -97,6 +100,12 @@ function ensureFreshWasmBundle(wasmPath: string): void {
       execFileSync("tar", ["-m", "-xzf", tmpBundle, "-C", path.dirname(wasmPath), "/policy.wasm"], {
         stdio: "pipe",
       });
+    } catch (err) {
+      if (wasmExists) {
+        // Pre-built policy.wasm is available (e.g., runtime container without opa CLI)
+        return;
+      }
+      throw err;
     } finally {
       fs.rmSync(tmpBundle, { force: true });
     }

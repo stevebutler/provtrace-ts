@@ -6,6 +6,7 @@ import { ProvStore } from "../src/db/store.js";
 import { ExtractionPipeline } from "../src/extractors/pipeline.js";
 import { createApp } from "../src/index.js";
 import { GOVERNANCE_RULES, type GovernanceRule } from "../src/prov/governance.js";
+import { type AuthConfig, loadAuthConfigFromEnv } from "../src/web/auth.js";
 
 test("ProvTrace extracts Git, AsciiDoc, and GitHub fixtures into W3C PROV graph", async () => {
   const repoDir = seedTargetRepo();
@@ -237,4 +238,154 @@ test("Hono + JSX + Datastar routes render full page, focus fragments, and PROV-J
   assert.ok(provDoc.wasDerivedFrom);
   assert.ok(provDoc.hadMember);
   assert.ok(provDoc.wasInvalidatedBy);
+});
+
+test("Read-only mode disables pipeline mutations and SSE while preserving graph exploration", async () => {
+  const store = new ProvStore(":memory:");
+  const pipeline = new ExtractionPipeline(store);
+  await pipeline.runAllLoaders(0);
+
+  const app = createApp(store, pipeline, { readOnly: true });
+
+  const healthRes = await app.request("/healthz");
+  assert.equal(healthRes.status, 200);
+  assert.deepEqual(await healthRes.json(), {
+    status: "ok",
+    readOnly: true,
+    authEnabled: false,
+  });
+
+  const homeRes = await app.request("/");
+  assert.equal(homeRes.status, 200);
+  const html = await homeRes.text();
+  assert.match(html, /Read-Only Preview/);
+  assert.match(html, /Read-Only Demo Snapshot/);
+  assert.doesNotMatch(html, /Run Full Pipeline/);
+  assert.doesNotMatch(html, /Reset Store/);
+  assert.doesNotMatch(html, /\/api\/stream/);
+
+  assert.equal((await app.request("/api/loaders/run-all", { method: "POST" })).status, 403);
+  assert.equal(
+    (await app.request("/api/loaders/run?loader=git-commits", { method: "POST" })).status,
+    403
+  );
+  assert.equal((await app.request("/api/loaders/reset", { method: "POST" })).status, 403);
+  assert.equal((await app.request("/api/stream")).status, 403);
+
+  // Interactive exploration & PROV-JSON export remain fully accessible
+  assert.equal((await app.request("/api/focus?id=entity%3Areq%3AREQ-001")).status, 200);
+  assert.equal((await app.request("/api/prov.json")).status, 200);
+});
+
+test("Google OAuth + allowlist middleware enforces screened reviewer access", async () => {
+  assert.throws(
+    () =>
+      loadAuthConfigFromEnv({
+        GOOGLE_CLIENT_ID: "client-id-only",
+      }),
+    /required environment variables are missing/
+  );
+
+  const store = new ProvStore(":memory:");
+  const pipeline = new ExtractionPipeline(store);
+  await pipeline.runAllLoaders(0);
+
+  const allowedEmails = new Set(["reviewer@example.com"]);
+  let nextMockUser = {
+    email: "uninvited@example.com",
+    email_verified: true,
+    name: "Uninvited User",
+  };
+
+  const authConfig: AuthConfig = {
+    enabled: true,
+    googleClientId: "test-client-id.apps.googleusercontent.com",
+    googleClientSecret: "test-client-secret",
+    sessionSecret: "0123456789abcdef0123456789abcdef",
+    allowedEmails,
+    publicBaseUrl: "https://provtrace.example.com",
+    exchangeCodeForUser: async () => nextMockUser,
+  };
+
+  const app = createApp(store, pipeline, { readOnly: true, auth: authConfig });
+
+  // Health check stays public for Cloud Run probes
+  assert.equal((await app.request("/healthz")).status, 200);
+
+  // Unauthenticated requests are redirected (HTML) or rejected with 401 (API)
+  const unauthHome = await app.request("/");
+  assert.equal(unauthHome.status, 302);
+  assert.equal(unauthHome.headers.get("location"), "/auth/signin?returnTo=%2F");
+
+  const unauthApi = await app.request("/api/prov.json");
+  assert.equal(unauthApi.status, 401);
+
+  const signInRes = await app.request("/auth/signin");
+  assert.equal(signInRes.status, 200);
+  assert.match(await signInRes.text(), /Sign in with Google/);
+
+  // Step 1: /auth/login redirects to Google OAuth with PKCE + state cookie
+  const loginRes = await app.request("/auth/login?returnTo=%2F%3Ffocus%3Dentity%3Areq%3AREQ-001");
+  assert.equal(loginRes.status, 302);
+  const googleRedirect = new URL(loginRes.headers.get("location")!);
+  assert.equal(googleRedirect.origin, "https://accounts.google.com");
+  assert.equal(googleRedirect.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(
+    googleRedirect.searchParams.get("redirect_uri"),
+    "https://provtrace.example.com/auth/callback"
+  );
+  const stateParam = googleRedirect.searchParams.get("state")!;
+  const stateCookie = loginRes.headers.get("set-cookie")!.split(";")[0];
+
+  // Step 2a: Non-allowlisted Google user is denied with 403
+  const deniedRes = await app.request(`/auth/callback?code=mock-code&state=${stateParam}`, {
+    headers: { Cookie: stateCookie },
+  });
+  assert.equal(deniedRes.status, 403);
+  assert.match(await deniedRes.text(), /Access Restricted/);
+
+  // Step 2b: Allowlisted Google user succeeds and receives signed HttpOnly session cookie
+  nextMockUser = {
+    email: "Reviewer@Example.com",
+    email_verified: true,
+    name: "Screened Reviewer",
+  };
+  const loginRes2 = await app.request("/auth/login?returnTo=%2F");
+  const stateParam2 = new URL(loginRes2.headers.get("location")!).searchParams.get("state")!;
+  const stateCookie2 = loginRes2.headers.get("set-cookie")!.split(";")[0];
+
+  const okCallback = await app.request(`/auth/callback?code=mock-code&state=${stateParam2}`, {
+    headers: { Cookie: stateCookie2 },
+  });
+  assert.equal(okCallback.status, 302);
+  assert.equal(okCallback.headers.get("location"), "/");
+  const setCookies = okCallback.headers.getSetCookie();
+  const sessionCookieHeader = setCookies.find((c) => c.startsWith("provtrace_session="))!;
+  assert.ok(sessionCookieHeader, "Callback must set provtrace_session cookie");
+  assert.match(sessionCookieHeader, /HttpOnly/i);
+  assert.match(sessionCookieHeader, /Secure/i);
+  const sessionCookie = sessionCookieHeader.split(";")[0];
+
+  // Step 3: Authenticated reviewer can access UI and API
+  const authedHome = await app.request("/", { headers: { Cookie: sessionCookie } });
+  assert.equal(authedHome.status, 200);
+  const authedHtml = await authedHome.text();
+  assert.match(authedHtml, /reviewer@example\.com/);
+  assert.match(authedHtml, /Sign out/);
+
+  const authedApi = await app.request("/api/prov.json", { headers: { Cookie: sessionCookie } });
+  assert.equal(authedApi.status, 200);
+
+  // Step 4: Removing email from allowlist immediately revokes access
+  allowedEmails.delete("reviewer@example.com");
+  const revokedApi = await app.request("/api/prov.json", { headers: { Cookie: sessionCookie } });
+  assert.equal(revokedApi.status, 401);
+
+  // Step 5: Logout clears session cookie and redirects to sign-in
+  const logoutRes = await app.request("/auth/logout", {
+    method: "POST",
+    headers: { Cookie: sessionCookie },
+  });
+  assert.equal(logoutRes.status, 302);
+  assert.equal(logoutRes.headers.get("location"), "/auth/signin");
 });

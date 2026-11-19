@@ -1,6 +1,7 @@
 import type { FC } from "hono/jsx";
 import type { ProvStore } from "../db/store.js";
 import type { GraphFocusMode } from "../prov/types.js";
+import type { AuthenticatedUser } from "./auth.js";
 import { computeProvGraphLayout } from "./graph-layout.js";
 import { APP_CSS } from "./styles.js";
 
@@ -89,10 +90,11 @@ export const KpiSection: FC<{ store: ProvStore }> = ({ store }) => {
   );
 };
 
-export const LoadersSection: FC<{ store: ProvStore; isRunning: boolean }> = ({
-  store,
-  isRunning,
-}) => {
+export const LoadersSection: FC<{
+  store: ProvStore;
+  isRunning: boolean;
+  readOnly?: boolean;
+}> = ({ store, isRunning, readOnly = false }) => {
   const loaders = store.getLoaderStatuses();
   const logs = store.getRecentLogs(18);
 
@@ -102,26 +104,33 @@ export const LoadersSection: FC<{ store: ProvStore; isRunning: boolean }> = ({
         <div>
           <h2>Data Extraction &amp; Linking Processes</h2>
           <p>
-            Live status of source extractors populating the SQLite W3C PROV store (streamed via
-            Datastar SSE)
+            {readOnly
+              ? "Pre-extracted snapshot of source extractors populating the SQLite W3C PROV store"
+              : "Live status of source extractors populating the SQLite W3C PROV store (streamed via Datastar SSE)"}
           </p>
         </div>
         <div class="panel-actions">
-          <button
-            type="button"
-            class="primary"
-            disabled={isRunning}
-            {...dsClick("@post('/api/loaders/run-all')")}
-          >
-            {isRunning ? "Pipeline Running…" : "▶ Run Full Pipeline"}
-          </button>
-          <button
-            type="button"
-            disabled={isRunning}
-            {...dsClick("@post('/api/loaders/reset')")}
-          >
-            Reset Store
-          </button>
+          {readOnly ? (
+            <span class="badge neutral">Read-Only Demo Snapshot</span>
+          ) : (
+            <>
+              <button
+                type="button"
+                class="primary"
+                disabled={isRunning}
+                {...dsClick("@post('/api/loaders/run-all')")}
+              >
+                {isRunning ? "Pipeline Running…" : "▶ Run Full Pipeline"}
+              </button>
+              <button
+                type="button"
+                disabled={isRunning}
+                {...dsClick("@post('/api/loaders/reset')")}
+              >
+                Reset Store
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -146,15 +155,17 @@ export const LoadersSection: FC<{ store: ProvStore; isRunning: boolean }> = ({
                   Items: <strong>{l.itemsProcessed}</strong> · Links:{" "}
                   <strong>{l.relationsCreated}</strong>
                 </span>
-                <button
-                  type="button"
-                  class="small"
-                  style="margin-inline-start: auto;"
-                  disabled={isRunning}
-                  {...dsClick(`@post('/api/loaders/run?loader=${l.loaderName}')`)}
-                >
-                  Run
-                </button>
+                {readOnly ? null : (
+                  <button
+                    type="button"
+                    class="small"
+                    style="margin-inline-start: auto;"
+                    disabled={isRunning}
+                    {...dsClick(`@post('/api/loaders/run?loader=${l.loaderName}')`)}
+                  >
+                    Run
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -897,7 +908,17 @@ export const AppPage: FC<{
   isRunning: boolean;
   focusId?: string;
   focusMode?: GraphFocusMode;
-}> = ({ store, isRunning, focusId, focusMode = "1hop" }) => {
+  readOnly?: boolean;
+  currentUser?: AuthenticatedUser | null;
+}> = ({
+  store,
+  isRunning,
+  focusId,
+  focusMode = "1hop",
+  readOnly = false,
+  currentUser = null,
+}) => {
+  const mainAttrs = readOnly ? {} : dsInit("@get('/api/stream')");
   return (
     <html lang="en">
       <head>
@@ -909,7 +930,7 @@ export const AppPage: FC<{
         <script type="module" src="/public/datastar.js" />
       </head>
       <body>
-        <main class="app-shell" {...dsInit("@get('/api/stream')")}>
+        <main class="app-shell" {...mainAttrs}>
           <header class="app-header">
             <div>
               <h1 class="app-title">ProvTrace · Provenance Tracer</h1>
@@ -918,13 +939,30 @@ export const AppPage: FC<{
                 GitHub Issues) modeled with W3C PROV
               </p>
             </div>
-            <div class="header-actions">
-              <span class="badge ok">SQLite + Hono JSX + Datastar</span>
+            <div class="header-actions" style="display: flex; align-items: safe center; gap: 0.5rem; flex-wrap: wrap;">
+              {readOnly ? <span class="badge neutral">Read-Only Preview</span> : null}
+              {currentUser ? (
+                <>
+                  <span
+                    class="badge ok"
+                    title={`Signed in as ${currentUser.name} (${currentUser.email})`}
+                  >
+                    {currentUser.email}
+                  </span>
+                  <form method="post" action="/auth/logout" style="margin: 0;">
+                    <button type="submit" class="small">
+                      Sign out
+                    </button>
+                  </form>
+                </>
+              ) : (
+                <span class="badge ok">SQLite + Hono JSX + Datastar</span>
+              )}
             </div>
           </header>
 
           <KpiSection store={store} />
-          <LoadersSection store={store} isRunning={isRunning} />
+          <LoadersSection store={store} isRunning={isRunning} readOnly={readOnly} />
           <ExplorerSection store={store} focusId={focusId} focusMode={focusMode} />
           <ReportsSection store={store} />
         </main>

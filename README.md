@@ -53,6 +53,10 @@ npm test
 
 ProvTrace ships with a multi-stage [`Dockerfile`](Dockerfile), read-only preview mode (`READ_ONLY_MODE=true`), and built-in Google OAuth 2.0 + email allowlist authentication (`ALLOWED_GOOGLE_EMAILS`). See [`docs/DEPLOY_CLOUD_RUN.md`](docs/DEPLOY_CLOUD_RUN.md) and [`.env.example`](.env.example) for setup instructions.
 
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
+
 ## AI contributions
 
 This project was created in Google Antigravity using Gemini 4 Argon.

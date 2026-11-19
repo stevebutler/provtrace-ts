@@ -1,6 +1,7 @@
 {
   "name": "provtrace-ts",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "Provenance Tracer (ProvTrace) - W3C PROV process mining prototype for software development",
   "type": "module",
   "scripts": {

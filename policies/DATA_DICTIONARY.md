@@ -34,7 +34,7 @@ Every policy evaluation receives an `input` JSON document with five top-level ar
 
 ## 3. W3C PROV Entities (`input.entities`)
 
-Each item in `input.entities` represents a software artifact or specification version (`prov:Entity`):
+Each item in `input.entities` represents a governed specification or tracker item (`prov:Entity`). Note that individual file versions are **not** modeled as separate graph nodes; instead, file changes are summarized on `CommitActivity` via repo-area `categories` (`"code"`, `"tests"`, `"docs"`, `"config"`).
 
 | Field | Type | Description |
 | :--- | :--- | :--- |
@@ -49,13 +49,10 @@ Each item in `input.entities` represents a software artifact or specification ve
 
 | `entityType` | W3C PROV Class | ID Pattern | Key `attributes` |
 | :--- | :--- | :--- | :--- |
-| `Requirement` | `prov:Entity` | `entity:req:<CODE>` | `code` (`"REQ-001"`), `title`, `status` (`"Approved"` \| `"In Progress"` \| `"Draft"`), `priority`, `sourceRefs` (`string[]` of issue numbers), `file` |
-| `DocumentRevision` | `prov:Collection` | `entity:file:<path>@<shortSha>` | `path` (`"docs/requirements.adoc"`), `commit` (full SHA) |
-| `CodeArtifact` | `prov:Entity` | `entity:file:<path>@<shortSha>` | `path` (`"src/pyledger/ledger.py"`), `commit` (full SHA) |
-| `TestArtifact` | `prov:Entity` | `entity:file:<path>@<shortSha>` | `path` (`"tests/test_ledger.py"`), `commit` (full SHA) |
+| `Requirement` | `prov:Entity` | `entity:req:<CODE>` | `code` (`"REQ-001"`), `title`, `status` (`"Approved"` \| `"In Progress"` \| `"Draft"`), `priority`, `sourceRefs` (`string[]` of issue numbers), `documentPath` (`"docs/requirements.adoc"`), `introducedInCommit` |
 | `Issue` | `prov:Entity` | `entity:issue:<number>` | `number`, `state` (`"open"` \| `"closed"`), `body`, `labels` (`string[]`) |
 | `Bug` | `prov:Entity` | `entity:issue:<number>` | `number`, `state` (`"open"` \| `"closed"`), `body`, `labels` (`string[]`, includes `"bug"`) |
-| `PullRequest` | `prov:Collection` | `entity:pr:<number>` | `number`, `state` (`"open"` \| `"merged"` \| `"closed"`), `closes_issues` (`number[]`), `commit_subject_match` |
+| `PullRequest` | `prov:Collection` | `entity:pr:<number>` | `number`, `state` (`"open"` \| `"merged"` \| `"closed"`), `closes_issues` (`number[]`), `commit_subject_match`. Modeled as a collection of constituent `CommitActivity` nodes via `prov:hadMember`. |
 
 ---
 
@@ -76,7 +73,7 @@ Each item in `input.activities` represents a time-bounded development action (`p
 
 | `activityType` | ID Pattern | Key `attributes` |
 | :--- | :--- | :--- |
-| `CommitActivity` | `activity:commit:<shortSha>` | `sha`, `shortSha`, `subject`, `fullMessage`, `files` (`string[]`), `deletedFiles` (`string[]`) |
+| `CommitActivity` | `activity:commit:<shortSha>` | `sha`, `shortSha`, `subject`, `fullMessage`, `categories` (`("code" \| "tests" \| "docs" \| "config")[]`), `files` (`string[]`), `deletedFiles` (`string[]`) |
 | `PullRequestReview` | `activity:pr-review:<prNumber>` | `prNumber` (`number`), `state` (`"open"` \| `"merged"` \| `"closed"`) |
 | `IssueReport` | `activity:issue-report:<issueNumber>` | `issueNumber` (`number`) |
 | `IssueResolution` | `activity:issue-close:<issueNumber>` | `issueNumber` (`number`) |
@@ -102,15 +99,15 @@ Each item in `input.relations` is a directed edge `subjectId --[relationType (ro
 
 | `relationType` | `subjectId` (From) | `objectId` (To) | Qualified `role` Values | Meaning |
 | :--- | :--- | :--- | :--- | :--- |
-| `used` | `prov:Activity` | `prov:Entity` | `null` | Activity read, consumed, or referenced the Entity (e.g., commit referencing an Issue/Requirement, or modifying a prior file version). |
-| `wasGeneratedBy` | `prov:Entity` | `prov:Activity` | `null` | Entity version was created by the Activity. |
-| `wasInvalidatedBy` | `prov:Entity` | `prov:Activity` | `"prov:Invalidate"` (`attributes.kind`: `"file-deleted"` \| `"issue-closed"` \| `"pr-merged"`) | Entity lifecycle ended (file deleted in commit, issue closed, or PR merged/closed). |
-| `wasRevisionOf` | Newer `prov:Entity` | Older `prov:Entity` | `"prov:Revision"` | Newer file revision directly evolved from the previous revision of the same file path in Git. |
-| `wasDerivedFrom` | Downstream `prov:Entity` | Upstream `prov:Entity` | `"provtrace:specifiedFromIssue"`, `"provtrace:tracksRequirement"`, `"provtrace:issueFollowUp"`, `"provtrace:resolvesIssue"`, `"provtrace:implementsIssue"`, `"provtrace:satisfiesRequirement"` | Downstream artifact traces its design or implementation to the upstream artifact. |
-| `hadMember` | `prov:Collection` (`DocumentRevision` or `PullRequest`) | Member `prov:Entity` (`Requirement` or file revision) | `"prov:Collection"` | Collection entity contains the member entity. |
+| `used` | `prov:Activity` | `prov:Entity` | `null` | Activity read, consumed, or referenced the Entity (e.g., `CommitActivity` implementing an `Issue` or `Requirement`). |
+| `wasGeneratedBy` | `prov:Entity` | `prov:Activity` | `null` | Entity was authored or created by the Activity (e.g., `Requirement` authored in a `docs` `CommitActivity`, or `Issue` created by `IssueReport`). |
+| `wasInvalidatedBy` | `prov:Entity` | `prov:Activity` | `"issue:closed"`, `"pr:merged"`, `"pr:closed"` | Entity lifecycle ended (issue closed or PR merged/closed). |
+| `wasRevisionOf` | Newer `prov:Entity` | Older `prov:Entity` | `"prov:Revision"` | Newer revision directly evolved from the previous revision of the same artifact. |
+| `wasDerivedFrom` | Downstream `prov:Entity` | Upstream `prov:Entity` | `"provtrace:specifiedFromIssue"`, `"provtrace:tracksRequirement"`, `"provtrace:issueFollowUp"`, `"provtrace:resolvesIssue"` | Downstream artifact traces its design or implementation to the upstream artifact. |
+| `hadMember` | `PullRequest` (`prov:Collection`) | `CommitActivity` (`prov:Activity`) | `"prov:Collection"` | Pull request contains its constituent commit activities. |
 | `wasAttributedTo` | `prov:Entity` | `prov:Agent` | `null` | Entity was authored or reported by the Agent. |
 | `wasAssociatedWith` | `prov:Activity` | `prov:Agent` | `"author"`, `"reviewer"`, `"reporter"`, `"resolver"` | Agent participated in the Activity in the specified qualified role (`prov:Association`). |
-| `wasInformedBy` | Downstream `prov:Activity` | Upstream `prov:Activity` | `null` | Upstream activity's output or context informed the downstream activity (e.g., `PullRequestReview` informed by `CommitActivity`). |
+| `wasInformedBy` | Downstream `prov:Activity` | Upstream `prov:Activity` | `"git:parentCommit"` \| `null` | Upstream activity's output or context informed the downstream activity (e.g., `PullRequestReview` informed by `CommitActivity`, or child commit informed by parent commit). |
 | `actedOnBehalfOf` | Delegate `prov:Agent` (`agent:git:*`) | Principal `prov:Agent` (`agent:github:*`) | `"provtrace:samePersonIdentity"` | Git commit author identity acts on behalf of the canonical GitHub user sharing the same email. |
 
 ---
@@ -127,9 +124,9 @@ For convenience in specification-coverage rules (`GOV-002`, `GOV-003`), `input.r
 | `specStatus` | `string` | Specification status (`"Approved"`, `"In Progress"`, `"Draft"`). |
 | `issues` | `ProvEntity[]` | Linked `Issue` and `Bug` entities. |
 | `pullRequests` | `ProvEntity[]` | Linked `PullRequest` entities. |
-| `commitActivities` | `ProvActivity[]` | `CommitActivity` records implementing this requirement. |
-| `codeFiles` | `ProvEntity[]` | Derived `CodeArtifact` file revisions (`src/*`). |
-| `testFiles` | `ProvEntity[]` | Derived `TestArtifact` file revisions (`tests/*`). |
+| `commitActivities` | `ProvActivity[]` | All `CommitActivity` records authoring or implementing this requirement. |
+| `codeCommits` | `ProvActivity[]` | Implementing `CommitActivity` records in the `"code"` category (`src/*`). |
+| `testCommits` | `ProvActivity[]` | Implementing `CommitActivity` records in the `"tests"` category (`tests/*`). |
 
 ---
 
@@ -157,11 +154,13 @@ When writing rules in [`policies/governance.rego`](governance.rego), import `dat
 ### Domain & Identity Helpers
 - `prov.canonical_agent_id(agent_id)`: Resolves Git author delegates (`agent:git:*`) to canonical GitHub person IDs (`agent:github:*`) via `actedOnBehalfOf`.
 - `prov.agent_label(agent_id)`: Human-readable display name for an agent ID.
+- `prov.commit_categories(commit_act)`: Array of repo-area categories touched (`"code"`, `"tests"`, `"docs"`, `"config"`).
 - `prov.commit_files(commit_act)`: Array of relative file paths modified by `commit_act`.
-- `prov.commit_touches_production_code(commit_act)`: True when `commit_act` modifies at least one non-`__init__.py` file under `src/`.
+- `prov.commit_touches_production_code(commit_act)`: True when `commit_act` has `"code"` in `categories` (or modifies non-`__init__.py` files under `src/`).
 - `prov.commit_references_governance_artifact(commit_act)`: True when `commit_act` has a `prov:used` link to any `Issue`, `Bug`, or `Requirement`.
+- `prov.pr_commits[pr.id]`: Set of constituent `CommitActivity` nodes belonging to `pr` via `hadMember`.
 - `prov.pr_canonical_reviewers[pr.id]`: Set of canonical agent IDs who reviewed `pr` (`role == "reviewer"`).
-- `prov.pr_canonical_authors[pr.id]`: Set of canonical agent IDs who authored `pr` or any commit informing `pr` (`role == "author"`).
+- `prov.pr_canonical_authors[pr.id]`: Set of canonical agent IDs who authored `pr` or any commit in `pr` (`role == "author"`).
 
 ---
 

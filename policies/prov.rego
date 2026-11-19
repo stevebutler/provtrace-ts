@@ -75,7 +75,7 @@ was_revision_of(newer_id, older_id) if {
 	rel.objectId == older_id
 }
 
-# prov:hadMember(CollectionEntity, MemberEntity)
+# prov:hadMember(Collection, Member)
 had_member(collection_id, member_id) if {
 	some rel in input.relations
 	rel.relationType == "hadMember"
@@ -116,10 +116,16 @@ agent_label(agent_id) := ag.label if {
 } else := agent_id
 
 # -----------------------------------------------------------------------------
-# 4. Domain Helpers for Commits, Specifications & Pull Request Reviews
+# 4. Domain Helpers for Categorized Commits & Pull Request Reviews
 # -----------------------------------------------------------------------------
 
+commit_categories(commit_act) := object.get(commit_act.attributes, "categories", [])
+
 commit_files(commit_act) := object.get(commit_act.attributes, "files", [])
+
+commit_touches_production_code(commit_act) if {
+	"code" in commit_categories(commit_act)
+}
 
 commit_touches_production_code(commit_act) if {
 	some file in commit_files(commit_act)
@@ -136,6 +142,13 @@ commit_references_governance_artifact(commit_act) if {
 
 is_governance_artifact_id(entity_id) if startswith(entity_id, "entity:issue:")
 is_governance_artifact_id(entity_id) if startswith(entity_id, "entity:req:")
+
+# Constituent CommitActivity nodes belonging to a PullRequest via prov:hadMember
+pr_commits[pr.id] contains commit_act if {
+	some pr in pull_requests
+	some commit_act in commit_activities
+	had_member(pr.id, commit_act.id)
+}
 
 pr_review_activity_id(pr) := sprintf("activity:pr-review:%v", [pr.attributes.number])
 
@@ -154,7 +167,7 @@ pr_canonical_reviewers[pr.id] contains canonical_agent_id(agent_id) if {
 	some agent_id in pr_reviewer_agent_ids(pr)
 }
 
-# Canonical author person IDs for a PullRequest (PR author + informing commit authors)
+# Canonical author person IDs for a PullRequest (PR author + member/informing commit authors)
 pr_canonical_authors[pr.id] contains canonical_agent_id(rel.objectId) if {
 	some pr in pull_requests
 	review_act_id := pr_review_activity_id(pr)
@@ -162,6 +175,15 @@ pr_canonical_authors[pr.id] contains canonical_agent_id(rel.objectId) if {
 	rel.relationType == "wasAssociatedWith"
 	rel.subjectId == review_act_id
 	object.get(rel, "role", "") == "author"
+}
+
+pr_canonical_authors[pr.id] contains canonical_agent_id(commit_assoc.objectId) if {
+	some pr in pull_requests
+	some commit_act in object.get(pr_commits, pr.id, set())
+	some commit_assoc in input.relations
+	commit_assoc.relationType == "wasAssociatedWith"
+	commit_assoc.subjectId == commit_act.id
+	object.get(commit_assoc, "role", "") == "author"
 }
 
 pr_canonical_authors[pr.id] contains canonical_agent_id(commit_assoc.objectId) if {

@@ -20,19 +20,19 @@ rules := [
 		"id": "GOV-001",
 		"category": "Untracked Work",
 		"severity": "high",
-		"description": "Every CommitActivity modifying production source files (src/*) must reference an upstream GitHub Issue or AsciiDoc Requirement via prov:used.",
+		"description": "Every CommitActivity touching production code (category 'code') must reference an upstream GitHub Issue or AsciiDoc Requirement via prov:used.",
 	},
 	{
 		"id": "GOV-002",
 		"category": "Unimplemented Spec",
 		"severity": "medium",
-		"description": "Every Requirement entity extracted from specifications should have at least one downstream CodeArtifact via prov:wasDerivedFrom.",
+		"description": "Every Requirement entity extracted from specifications should have at least one implementing CommitActivity in the 'code' category.",
 	},
 	{
 		"id": "GOV-003",
 		"category": "Missing Test Coverage",
 		"severity": "medium",
-		"description": "Every implemented Requirement with derived CodeArtifact entities must also have at least one derived TestArtifact.",
+		"description": "Every Requirement implemented by 'code' commits must also have at least one CommitActivity in the 'tests' category.",
 	},
 	{
 		"id": "GOV-004",
@@ -49,7 +49,7 @@ findings["GOV-001"] contains {
 	"nodeId": commit_act.id,
 	"label": commit_act.label,
 	"detail": sprintf(
-		"Commit activity modifies production source (%s) with no prov:used link to any GitHub Issue or AsciiDoc Requirement.",
+		"Commit activity touches production code (%s) with no prov:used link to any GitHub Issue or AsciiDoc Requirement.",
 		[concat(", ", prov.commit_files(commit_act))],
 	),
 } if {
@@ -65,12 +65,12 @@ findings["GOV-002"] contains {
 	"nodeId": trace.reqId,
 	"label": sprintf("%s: %s", [trace.code, trace.title]),
 	"detail": sprintf(
-		"Defined in AsciiDoc (%s) with %d linked issue(s), but zero derived CodeArtifact entities exist.",
+		"Defined in AsciiDoc (%s) with %d linked issue(s), but zero 'code' category commits implement this requirement.",
 		[trace.specStatus, count(trace.issues)],
 	),
 } if {
 	some trace in input.requirementTraces
-	count(trace.codeFiles) == 0
+	count(trace.codeCommits) == 0
 }
 
 # -----------------------------------------------------------------------------
@@ -80,14 +80,14 @@ findings["GOV-003"] contains {
 	"nodeId": trace.reqId,
 	"label": sprintf("%s: %s", [trace.code, trace.title]),
 	"detail": sprintf(
-		"Implemented in %s, but no TestArtifact derives from this requirement or its commit activities.",
-		[concat(", ", file_names)],
+		"Implemented by code commit(s) (%s), but zero 'tests' category commits cover this requirement.",
+		[concat(", ", commit_labels)],
 	),
 } if {
 	some trace in input.requirementTraces
-	count(trace.codeFiles) > 0
-	count(trace.testFiles) == 0
-	file_names := [object.get(f.attributes, "path", f.label) | some f in trace.codeFiles]
+	count(trace.codeCommits) > 0
+	count(trace.testCommits) == 0
+	commit_labels := [object.get(c.attributes, "shortSha", c.label) | some c in trace.codeCommits]
 }
 
 # -----------------------------------------------------------------------------

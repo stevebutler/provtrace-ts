@@ -12,18 +12,30 @@ test_rules_metadata_catalog if {
 
 test_prov_vocabulary_predicates if {
 	mock_input := {
-		"entities": [{
-			"id": "entity:issue:1",
-			"entityType": "Issue",
-			"label": "Issue #1",
-			"source": "github-issues",
-			"attributes": {"number": 1, "state": "open"},
-		}],
+		"entities": [
+			{
+				"id": "entity:issue:1",
+				"entityType": "Issue",
+				"label": "Issue #1",
+				"source": "github-issues",
+				"attributes": {"number": 1, "state": "open"},
+			},
+			{
+				"id": "entity:pr:10",
+				"entityType": "PullRequest",
+				"label": "PR #10",
+				"source": "github-issues",
+				"attributes": {"number": 10, "state": "merged"},
+			},
+		],
 		"activities": [{
 			"id": "activity:commit:abc",
 			"activityType": "CommitActivity",
 			"label": "abc: Initial commit",
-			"attributes": {"files": ["src/pyledger/ledger.py"]},
+			"attributes": {
+				"categories": ["code", "tests"],
+				"files": ["src/pyledger/ledger.py", "tests/test_ledger.py"],
+			},
 		}],
 		"agents": [
 			{"id": "agent:github:alice-pm", "agentType": "Person", "label": "Alice", "attributes": {}},
@@ -34,6 +46,11 @@ test_prov_vocabulary_predicates if {
 				"relationType": "used",
 				"subjectId": "activity:commit:abc",
 				"objectId": "entity:issue:1",
+			},
+			{
+				"relationType": "hadMember",
+				"subjectId": "entity:pr:10",
+				"objectId": "activity:commit:abc",
 			},
 			{
 				"relationType": "actedOnBehalfOf",
@@ -47,6 +64,7 @@ test_prov_vocabulary_predicates if {
 	prov.used("activity:commit:abc", "entity:issue:1") with input as mock_input
 	prov.canonical_agent_id("agent:git:alice") == "agent:github:alice-pm" with input as mock_input
 	count(prov.entities_by_type.Issue) == 1 with input as mock_input
+	count(prov.pr_commits["entity:pr:10"]) == 1 with input as mock_input
 }
 
 test_gov_001_untracked_work if {
@@ -57,13 +75,19 @@ test_gov_001_untracked_work if {
 				"id": "activity:commit:abc1234",
 				"activityType": "CommitActivity",
 				"label": "abc1234: Quick hotfix",
-				"attributes": {"files": ["src/pyledger/cli.py"]},
+				"attributes": {
+					"categories": ["code"],
+					"files": ["src/pyledger/cli.py"],
+				},
 			},
 			{
 				"id": "activity:commit:def5678",
 				"activityType": "CommitActivity",
 				"label": "def5678: Traced commit",
-				"attributes": {"files": ["src/pyledger/ledger.py"]},
+				"attributes": {
+					"categories": ["code", "tests"],
+					"files": ["src/pyledger/ledger.py"],
+				},
 			},
 		],
 		"agents": [],
@@ -93,18 +117,18 @@ test_gov_002_and_003_requirement_traces if {
 				"code": "REQ-001",
 				"title": "Compliant Req",
 				"specStatus": "Approved",
-				"issues": [{"id": "entity:issue:1"}],
-				"codeFiles": [{"id": "entity:file:1", "label": "ledger.py", "attributes": {"path": "src/pyledger/ledger.py"}}],
-				"testFiles": [{"id": "entity:file:2", "label": "test_ledger.py", "attributes": {"path": "tests/test_ledger.py"}}],
+				"issues": [{"id": "entity:issue:1", "entityType": "Issue", "label": "#1", "source": "github-issues", "attributes": {}}],
+				"codeCommits": [{"id": "activity:commit:8529bc9", "activityType": "CommitActivity", "label": "8529bc9: Impl", "attributes": {"shortSha": "8529bc9", "categories": ["code", "tests"]}}],
+				"testCommits": [{"id": "activity:commit:8529bc9", "activityType": "CommitActivity", "label": "8529bc9: Impl", "attributes": {"shortSha": "8529bc9", "categories": ["code", "tests"]}}],
 			},
 			{
 				"reqId": "entity:req:REQ-003",
 				"code": "REQ-003",
 				"title": "Untested Req",
 				"specStatus": "Approved",
-				"issues": [{"id": "entity:issue:3"}],
-				"codeFiles": [{"id": "entity:file:3", "label": "budget.py", "attributes": {"path": "src/pyledger/budget.py"}}],
-				"testFiles": [],
+				"issues": [{"id": "entity:issue:4", "entityType": "Issue", "label": "#4", "source": "github-issues", "attributes": {}}],
+				"codeCommits": [{"id": "activity:commit:80c1cef", "activityType": "CommitActivity", "label": "80c1cef: Budget", "attributes": {"shortSha": "80c1cef", "categories": ["code"]}}],
+				"testCommits": [],
 			},
 			{
 				"reqId": "entity:req:REQ-004",
@@ -112,8 +136,8 @@ test_gov_002_and_003_requirement_traces if {
 				"title": "Unimplemented Req",
 				"specStatus": "Draft",
 				"issues": [],
-				"codeFiles": [],
-				"testFiles": [],
+				"codeCommits": [],
+				"testCommits": [],
 			},
 		],
 	}
@@ -130,22 +154,33 @@ test_gov_004_four_eyes_review_with_delegation if {
 			"id": "entity:pr:11",
 			"entityType": "PullRequest",
 			"label": "PR #11: Fix split_amount",
+			"source": "github-issues",
 			"attributes": {"number": 11, "state": "merged"},
 		}],
-		"activities": [],
+		"activities": [{
+			"id": "activity:commit:c1",
+			"activityType": "CommitActivity",
+			"label": "c1: Fix split_amount",
+			"attributes": {"categories": ["code", "tests"]},
+		}],
 		"agents": [
-			{"id": "agent:github:bob-dev", "label": "Bob (@bob-dev)"},
-			{"id": "agent:git:bob", "label": "Bob Git"},
+			{"id": "agent:github:bob-dev", "agentType": "Person", "label": "Bob (@bob-dev)", "attributes": {}},
+			{"id": "agent:git:bob", "agentType": "Person", "label": "Bob Git", "attributes": {}},
 		],
 		"relations": [
+			{
+				"relationType": "used",
+				"subjectId": "activity:commit:c1",
+				"objectId": "entity:issue:3",
+			},
 			{
 				"relationType": "actedOnBehalfOf",
 				"subjectId": "agent:git:bob",
 				"objectId": "agent:github:bob-dev",
 			},
 			{
-				"relationType": "wasInformedBy",
-				"subjectId": "activity:pr-review:11",
+				"relationType": "hadMember",
+				"subjectId": "entity:pr:11",
 				"objectId": "activity:commit:c1",
 			},
 			{

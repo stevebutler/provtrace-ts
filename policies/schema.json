@@ -14,15 +14,7 @@
         "id": { "type": "string" },
         "entityType": {
           "type": "string",
-          "enum": [
-            "Requirement",
-            "DocumentRevision",
-            "Issue",
-            "Bug",
-            "PullRequest",
-            "CodeArtifact",
-            "TestArtifact"
-          ]
+          "enum": ["Requirement", "Issue", "Bug", "PullRequest"]
         },
         "label": { "type": "string" },
         "source": {
@@ -38,9 +30,8 @@
             "status": { "type": "string" },
             "priority": { "type": "string" },
             "sourceRefs": { "type": "array", "items": { "type": "string" } },
-            "file": { "type": "string" },
-            "path": { "type": "string" },
-            "commit": { "type": "string" },
+            "documentPath": { "type": "string" },
+            "introducedInCommit": { "type": "string" },
             "number": { "type": "number" },
             "state": { "type": "string" },
             "body": { "type": "string" },
@@ -78,6 +69,13 @@
             "shortSha": { "type": "string" },
             "subject": { "type": "string" },
             "fullMessage": { "type": "string" },
+            "categories": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["code", "tests", "docs", "config"]
+              }
+            },
             "files": { "type": "array", "items": { "type": "string" } },
             "deletedFiles": { "type": "array", "items": { "type": "string" } },
             "issueNumber": { "type": "number" },
@@ -149,8 +147,8 @@
         "title",
         "specStatus",
         "issues",
-        "codeFiles",
-        "testFiles"
+        "codeCommits",
+        "testCommits"
       ],
       "additionalProperties": false,
       "properties": {
@@ -170,13 +168,13 @@
           "type": "array",
           "items": { "$ref": "#/definitions/ProvActivity" }
         },
-        "codeFiles": {
+        "codeCommits": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ProvEntity" }
+          "items": { "$ref": "#/definitions/ProvActivity" }
         },
-        "testFiles": {
+        "testCommits": {
           "type": "array",
-          "items": { "$ref": "#/definitions/ProvEntity" }
+          "items": { "$ref": "#/definitions/ProvActivity" }
         }
       }
     }
